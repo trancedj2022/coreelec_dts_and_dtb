@@ -1,0 +1,79 @@
+name: Compile XiaoYi Pro DTS
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  LINUX_AMLOGIC_ROOT: /tmp/linux-amlogic
+  OUTPUT_DIR: /tmp/output
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y device-tree-compiler bc bison flex build-essential
+
+    - name: Clone CoreELEC kernel
+      run: |
+        git clone --depth=1 https://github.com/CoreELEC/linux-amlogic.git "$LINUX_AMLOGIC_ROOT"
+
+    - name: Find existing DTS files
+      run: |
+        cd "$LINUX_AMLOGIC_ROOT"
+        echo "=== All board DTS files ==="
+        find arch/arm64/boot/dts/amlogic -name "*.dts" ! -name "*.dtsi" | sort
+        echo ""
+        echo "=== DTSI files ==="
+        find arch/arm64/boot/dts/amlogic -name "*.dtsi" | head -20
+
+    - name: Compile a known working DTS
+      run: |
+        cd "$LINUX_AMLOGIC_ROOT"
+        
+        # 找一个存在的 DTS 来测试编译
+        TEST_DTS=$(find arch/arm64/boot/dts/amlogic -name "*.dts" ! -name "*.dtsi" | head -1)
+        echo "Testing compilation with: $TEST_DTS"
+        
+        # 尝试使用内核的 Makefile
+        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- dtbs 2>&1 | head -50 || true
+        
+        # 查找编译好的 DTB
+        echo "=== Compiled DTBs ==="
+        find arch/arm64/boot/dts/amlogic -name "*.dtb" | head -10
+        
+        # 复制所有 DTB
+        mkdir -p "$OUTPUT_DIR"
+        find arch/arm64/boot/dts/amlogic -name "*.dtb" -exec cp {} "$OUTPUT_DIR/" \;
+        ls -la "$OUTPUT_DIR/"
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: dtbs
+        path: ${{ env.OUTPUT_DIR }}
+        retention-days: 7
+
+    - name: Create release
+      run: |
+        cd "$OUTPUT_DIR"
+        RELEASE_ZIP="/tmp/dtbs.zip"
+        zip -9 -r "$RELEASE_ZIP" .
+        echo "RELEASE_ZIP=$RELEASE_ZIP" >> $GITHUB_ENV
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        make_latest: true
+        tag_name: "v$(date '+%Y%m%d-%H%M%S')"
+        files: |
+          ${{ env.RELEASE_ZIP }}
