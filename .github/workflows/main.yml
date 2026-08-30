@@ -1,9 +1,10 @@
-name: Compile DTS to DTB
+name: Compile XiaoYi Pro DTS to DTB
 
-on: 
-  #workflow_dispatch
-  schedule:
-   - cron:  '10 5 * * *'
+on:
+  workflow_dispatch:  # 手动触发
+  push:
+    paths:
+      - 'dts/*.dts'
 
 permissions:
   contents: write
@@ -13,82 +14,113 @@ env:
   LINUX_AMLOGIC_GIT: https://github.com/CoreELEC/linux-amlogic.git
   COMMON_DRIVERS_GIT: https://github.com/CoreELEC/common_drivers.git
   LINUX_AMLOGIC_ROOT: /tmp/linux-amlogic
-  COMMON_DRIVERS_ROOT: /tmp/linux-amlogic/common_drivers
-  DTS_ROOT: /tmp/linux-amlogic/common_drivers/arch/
-  RELEASE_NOTES: /tmp/releasenotes
-  RELEASE_ZIP: /tmp/coreelec_dts_dtb.zip
-  
+  OUTPUT_DIR: /tmp/output
+
 jobs:
-  build:
+  compile:
     runs-on: ubuntu-latest
+    
     steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
     - name: Install prerequisites
       run: |
         $APT update
-        $APT install fd-find autoconf build-essential bc bison flex device-tree-compiler
-    
-    - name: Set up environment
+        $APT install device-tree-compiler bc bison flex build-essential
+
+    - name: Clone CoreELEC kernel for headers
       run: |
-        cd /tmp/
-        RELEASE_NAME="$(date '+%Y%m%d%H%m%S')"
-        echo "RELEASE_NAME=$RELEASE_NAME" >> $GITHUB_ENV
-        
         git clone -q --depth=1 "$LINUX_AMLOGIC_GIT" "$LINUX_AMLOGIC_ROOT"
-        
-        cd "$LINUX_AMLOGIC_ROOT"        
-        git clone -q --depth=1 "$COMMON_DRIVERS_GIT" "$COMMON_DRIVERS_ROOT"
-        
-        ls -al "$LINUX_AMLOGIC_ROOT"
-        ls -al "$COMMON_DRIVERS_ROOT"
-        
-        du -sh "$LINUX_AMLOGIC_ROOT"
-        du -sh "$COMMON_DRIVERS_ROOT"
-
-    - name: Show versions
-      run: |
         cd "$LINUX_AMLOGIC_ROOT"
-        echo -e "linux-amlogic:\t$(git branch --show current)" | tee -a "$RELEASE_NOTES"
+        git clone -q --depth=1 "$COMMON_DRIVERS_GIT" common_drivers
+        ls -la "$LINUX_AMLOGIC_ROOT/common_drivers/arch/arm64/boot/dts/amlogic/"
+
+    - name: Compile DTS to DTB
+      run: |
+        mkdir -p "$OUTPUT_DIR"
         
-        cd "$COMMON_DRIVERS_ROOT"
-        echo -e "common_drivers:\t$(git branch --show current)" | tee -a "$RELEASE_NOTES"
+        DTS_FILE="${{ github.workspace }}/dts/meson-g12b-a311d-xiaoyi-pro-coreelec.dts"
+        
+        if [ ! -f "$DTS_FILE" ]; then
+          echo "ERROR: DTS file not found!"
+          exit 1
+        fi
+        
+        echo "=== Compiling: $(basename $DTS_FILE) ==="
+        
+        # 使用 cpp 预处理
+        cpp -nostdinc -undef -x assembler-with-cpp \
+          -I "$LINUX_AMLOGIC_ROOT/include" \
+          -I "$LINUX_AMLOGIC_ROOT/common_drivers/include" \
+          -I "$LINUX_AMLOGIC_ROOT/arch/arm64/boot/dts" \
+          -I "$LINUX_AMLOGIC_ROOT/arch/arm64/boot/dts/amlogic" \
+          -I "$LINUX_AMLOGIC_ROOT/arch/arm64/boot/dts/amlogic/overlays" \
+          "$DTS_FILE" > "$OUTPUT_DIR/preprocessed.dts" 2>&1 || true
+        
+        # 检查预处理是否成功
+        if [ ! -s "$OUTPUT_DIR/preprocessed.dts" ]; then
+          echo "WARNING: Preprocessing failed, trying direct compilation"
+          cp "$DTS_FILE" "$OUTPUT_DIR/preprocessed.dts"
+        fi
+        
+        # 编译为 DTB
+        dtc -q -I dts -O dtb \
+          -o "$OUTPUT_DIR/meson-g12b-a311d-xiaoyi-pro-coreelec.dtb" \
+          "$OUTPUT_DIR/preprocessed.dts" 2>&1 || true
+        
+        # 反编译验证
+        if [ -f "$OUTPUT_DIR/meson-g12b-a311d-xiaoyi-pro-coreelec.dtb" ]; then
+          echo "=== DTB compiled successfully ==="
+          dtc -I dtb -O dts \
+            -o "$OUTPUT_DIR/meson-g12b-a311d-xiaoyi-pro-coreelec.decompiled.dts" \
+            "$OUTPUT_DIR/meson-g12b-a311d-xiaoyi-pro-coreelec.dtb"
+          ls -lh "$OUTPUT_DIR/"
+        else
+          echo "=== Compilation FAILED ==="
+          cat "$OUTPUT_DIR/preprocessed.dts" | head -50
+          exit 1
+        fi
 
-    - name: Make DTBs
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: coreelec-dtb
+        path: |
+          ${{ env.OUTPUT_DIR }}/*.dtb
+          ${{ env.OUTPUT_DIR }}/*.decompiled.dts
+          ${{ github.workspace }}/dts/*.dts
+        retention-days: 7
+
+    - name: Create Release ZIP
       run: |
-        cd "$LINUX_AMLOGIC_ROOT"
-        make -j$(nproc) ARCH=arm64 defconfig && make -j$(nproc) ARCH=arm64 dtbs
-        make -j$(nproc) ARCH=arm defconfig && make -j$(nproc) ARCH=arm dtbs
-        make -j$(nproc) ARCH=riscv defconfig && make -j$(nproc) ARCH=riscv dtbs
+        cd "$OUTPUT_DIR"
+        RELEASE_ZIP="/tmp/xiaoyi-pro-dtb.zip"
+        zip -9 -j "$RELEASE_ZIP" *.dtb *.decompiled.dts 2>/dev/null || true
+        cd "${{ github.workspace }}/dts"
+        zip -9 -j "$RELEASE_ZIP" *.dts 2>/dev/null || true
+        
+        echo "RELEASE_ZIP=$RELEASE_ZIP" >> $GITHUB_ENV
+        
+        echo "=== Release ZIP contents ==="
+        unzip -l "$RELEASE_ZIP"
+        
+        sha256sum --tag "$RELEASE_ZIP" | tee /tmp/releasenotes
 
-    - name: Concatenate full DTSs
-      run: |
-        cd /tmp/
-        fdfind -e dts . "$DTS_ROOT" -x cpp -nostdinc -undef -x assembler-with-cpp -I "$LINUX_AMLOGIC_ROOT/include" -I "$COMMON_DRIVERS_ROOT/include" -o "{.}_full.dts" "{}" || true
-
-    - name: Decompile the compiled DTBs
-      run: |
-        cd /tmp/
-        fdfind -e dtb . "$DTS_ROOT" -x dtc -q -I dtb -O dts -o "{.}_decompiled.dts" "{}"
-    
-    - name: List files
-      run: |
-        cd /tmp/
-        fdfind -e dts -e dtb . "$DTS_ROOT" | sort
-
-    - name: Add to ZIP
-      run: |
-        cd "$COMMON_DRIVERS_ROOT"
-        fdfind -e dts -e dtb . | sort | zip -9 -q -o "$RELEASE_ZIP" -@
-
-        cd $(dirname "$RELEASE_ZIP")
-        sha256sum --tag $(basename "$RELEASE_ZIP") | tee -a "$RELEASE_NOTES"
-        ls -alh "$RELEASE_ZIP"
-
-    - name: Create a new Github release
-      uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda #v3.0.1
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
       with:
         make_latest: true
-        body_path: ${{ env.RELEASE_NOTES }}
-        name: version ${{ env.RELEASE_NAME }}
-        tag_name: v${{ env.RELEASE_NAME }}
-        files: |
-          ${{ env.RELEASE_ZIP }}
+        body: |
+          ## CoreELEC DTB for CAINIAO XiaoYi Pro
+          
+          - Device: CAINIAO XiaoYi Pro (Amlogic A311D)
+          - Kernel: CoreELEC 4.9.269
+          - Features: Fan, LED (AW2013), RTC (DS1307), IR, CEC, Audio Amplifier
+          
+          ### Files:
+          - `meson-g12b-a311d-xiaoyi-pro-coreelec.dtb` - 编译后的设备树文件
+          - `meson-g12b-a311d-xiaoyi-pro-coreelec.decompiled.dts` - 反编译用于验证
+          - `meson-g12b-a311d-xiaoyi-pro-coreelec.dts` - 原始 DTS 源码
+          
+          ### SHA256:
