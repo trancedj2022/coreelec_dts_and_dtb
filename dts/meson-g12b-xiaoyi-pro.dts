@@ -105,6 +105,7 @@
     };
 };
 
+/* ===== eMMC ===== */
 &sd_emmc_c {
     status = "okay";
     bus-width = <8>;
@@ -117,6 +118,7 @@
     vqmmc-supply = <&vddao_1v8>;
 };
 
+/* ===== SDIO (WiFi) ===== */
 &sd_emmc_a {
     status = "okay";
     bus-width = <4>;
@@ -130,10 +132,12 @@
     mmc-pwrseq = <&sdio_pwrseq>;
 };
 
+/* ===== UART ===== */
 &uart_AO {
     status = "okay";
 };
 
+/* ===== USB ===== */
 &usb {
     status = "okay";
     dr_mode = "host";
@@ -149,11 +153,13 @@
     phy-supply = <&host_vbus>;
 };
 
+/* ===== 以太网 ===== */
 ðmac {
     status = "okay";
     phy-mode = "rgmii";
 };
 
+/* ===== HDMI ===== */
 &hdmi_tx {
     status = "okay";
 };
@@ -166,14 +172,17 @@
     status = "okay";
 };
 
+/* ===== CEC ===== */
 &cec_AO {
     status = "okay";
 };
 
+/* ===== IR 红外 ===== */
 &ir {
     status = "okay";
 };
 
+/* ===== PWM ===== */
 &pwm_ab {
     status = "okay";
 };
@@ -186,42 +195,39 @@
     status = "okay";
 };
 
+/* ===== ADC ===== */
 &saradc {
     status = "okay";
     vref-supply = <&vddao_1v8>;
 };
 
+/* ===== 看门狗 ===== */
 &watchdog {
     status = "okay";
 };
 
+/* ===== RTC ===== */
 &vrtc {
     status = "okay";
 };
 
-/* 删除 cpu_thermal 中已有的 cooling-maps，然后重新定义 */
+/* ===== 温度传感器（不修改 cooling-maps，只设置 polling-delay） ===== */
 &cpu_thermal {
-    /delete-property/ cooling-maps;
-    
     polling-delay = <1000>;
     polling-delay-passive = <100>;
+};
 
-    trips {
-        cpu_passive: cpu-passive {
-            temperature = <85000>;
-            hysteresis = <2000>;
-            type = "passive";
-        };
-    };
-
+/* 单独添加风扇冷却映射，使用 &cpu_thermal 原有的 trips */
+&cpu_thermal {
     cooling-maps {
-        map {
+        map0 {
             trip = <&cpu_passive>;
             cooling-device = <&gpio_fan 1 1>;
         };
     };
 };
 
+/* ===== I2C1: AW2013 LED ===== */
 &i2c1 {
     status = "okay";
     led-controller@45 {
@@ -247,6 +253,7 @@
     };
 };
 
+/* ===== I2C2: DS1307 RTC ===== */
 &i2c2 {
     status = "okay";
     rtc@68 {
