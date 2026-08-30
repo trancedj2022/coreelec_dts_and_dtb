@@ -13,6 +13,7 @@ env:
   PROJECT: Amlogic-ce
   DEVICE: Amlogic-ng
   COREELEC_REPO: https://github.com/CoreELEC/CoreELEC.git
+  LINUX_REPO: https://github.com/CoreELEC/linux-amlogic.git  # 添加这一行
   DTS_SOURCE: ${{ github.workspace }}/dts/meson-g12b-xiaoyi-pro.dts
 
 jobs:
@@ -37,7 +38,7 @@ jobs:
       - name: Clone CoreELEC kernel repository
         run: |
           cd CoreELEC
-          # 克隆内核仓库到标准位置
+          # 现在 $LINUX_REPO 有了正确的值
           git clone --depth=1 "$LINUX_REPO" projects/$PROJECT/devices/$DEVICE/linux
 
       - name: Inject custom DTS into kernel source
@@ -46,7 +47,7 @@ jobs:
           KERNEL_DTS_DIR="projects/$PROJECT/devices/$DEVICE/linux/arch/arm64/boot/dts/amlogic/"
           mkdir -p "$KERNEL_DTS_DIR"
           
-          # 复制你的 DTS 文件到内核设备树目录，并替换默认文件（如果存在）
+          # 复制你的 DTS 文件到内核设备树目录
           cp "${{ env.DTS_SOURCE }}" "$KERNEL_DTS_DIR/meson-g12b-xiaoyi-pro.dts"
           
           # 编辑内核的 Makefile，添加你的 dtb 到编译列表
