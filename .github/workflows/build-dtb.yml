@@ -10,10 +10,8 @@ permissions:
   contents: write
 
 env:
-  PROJECT: Amlogic-ce
-  DEVICE: Amlogic-ng
-  COREELEC_REPO: https://github.com/CoreELEC/CoreELEC.git
   LINUX_REPO: https://github.com/CoreELEC/linux-amlogic.git
+  COMMON_DRIVERS_REPO: https://github.com/CoreELEC/common_drivers.git
   DTS_SOURCE: ${{ github.workspace }}/my_repo/dts/meson-g12b-xiaoyi-pro.dts
 
 jobs:
@@ -35,9 +33,21 @@ jobs:
         run: |
           git clone --depth=1 "$LINUX_REPO" linux-amlogic
           cd linux-amlogic
+          echo "=== Kernel version ==="
           git log --oneline -1
+          echo ""
+          echo "=== Checking for common_drivers requirement ==="
+          grep -r "common_drivers" . 2>/dev/null | head -5 || echo "No reference found"
 
-      - name: Copy DTS to kernel tree and inject into Makefile
+      - name: Clone common_drivers repository
+        run: |
+          # common_drivers 必须放在内核源码树的 common_drivers 目录下
+          cd linux-amlogic
+          git clone --depth=1 "$COMMON_DRIVERS_REPO" common_drivers
+          echo "=== common_drivers cloned ==="
+          ls -la common_drivers/
+
+      - name: Copy DTS to kernel tree
         run: |
           cd linux-amlogic
           
@@ -59,7 +69,7 @@ jobs:
         run: |
           cd linux-amlogic
           
-          # 配置内核（只需要生成配置文件，不需要完整编译）
+          # 配置内核（现在 common_drivers 已存在）
           echo "=== Configuring kernel ==="
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig
           
@@ -78,8 +88,12 @@ jobs:
             cp "$DTB_PATH" meson-g12b-xiaoyi-pro.dtb
             echo "DTB_FILE=meson-g12b-xiaoyi-pro.dtb" >> $GITHUB_ENV
             echo "DTB found and copied!"
+            echo "DTB size:"
+            ls -la meson-g12b-xiaoyi-pro.dtb
           else
             echo "::error::DTB file not found!"
+            echo "Searching for any DTB files..."
+            find . -name "*.dtb" | head -10
             exit 1
           fi
 
@@ -90,6 +104,9 @@ jobs:
             echo "=== DTB info ==="
             file meson-g12b-xiaoyi-pro.dtb
             ls -la meson-g12b-xiaoyi-pro.dtb
+            echo ""
+            echo "=== Decompiled DTS (first 30 lines) ==="
+            head -30 meson-g12b-xiaoyi-pro.decompiled.dts 2>/dev/null || echo "No decompiled file"
           fi
 
       - name: Upload DTB as Artifact
@@ -105,8 +122,14 @@ jobs:
         run: |
           RELEASE_TAG="v$(date +'%Y%m%d-%H%M%S')"
           echo "RELEASE_TAG=$RELEASE_TAG" >> $GITHUB_ENV
-          zip -9 xiaoyi-pro-dtb.zip meson-g12b-xiaoyi-pro.dtb meson-g12b-xiaoyi-pro.decompiled.dts 2>/dev/null || \
-            zip -9 xiaoyi-pro-dtb.zip meson-g12b-xiaoyi-pro.dtb
+          if [ -f "meson-g12b-xiaoyi-pro.dtb" ]; then
+            zip -9 xiaoyi-pro-dtb.zip meson-g12b-xiaoyi-pro.dtb meson-g12b-xiaoyi-pro.decompiled.dts 2>/dev/null || \
+              zip -9 xiaoyi-pro-dtb.zip meson-g12b-xiaoyi-pro.dtb
+            echo "ZIP created successfully."
+          else
+            echo "No DTB file to zip."
+            exit 1
+          fi
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
