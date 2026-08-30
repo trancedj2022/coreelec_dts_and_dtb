@@ -22,8 +22,7 @@ jobs:
     - name: Clone CoreELEC kernel
       run: |
         git clone --depth=1 https://github.com/CoreELEC/linux-amlogic.git /tmp/linux-amlogic
-        echo "=== Checking DTSI files ==="
-        ls -la /tmp/linux-amlogic/arch/arm64/boot/dts/amlogic/*.dtsi 2>/dev/null | head -10 || echo "No DTSI files"
+        echo "=== Kernel cloned ==="
 
     - name: Create DTS file
       run: |
@@ -227,26 +226,6 @@ jobs:
             status = "okay";
         };
         
-        &cpu_thermal {
-            polling-delay = <1000>;
-            polling-delay-passive = <100>;
-        
-            trips {
-                cpu_passive: cpu-passive {
-                    temperature = <85000>;
-                    hysteresis = <2000>;
-                    type = "passive";
-                };
-            };
-        
-            cooling-maps {
-                map {
-                    trip = <&cpu_passive>;
-                    cooling-device = <&gpio_fan 1 1>;
-                };
-            };
-        };
-        
         &i2c1 {
             status = "okay";
             led-controller@45 {
@@ -298,18 +277,40 @@ jobs:
 
     - name: Compile DTS to DTB
       run: |
-        # 尝试直接编译
-        dtc -I dts -O dtb -o meson-g12b-xiaoyi-pro.dtb meson-g12b-xiaoyi-pro.dts 2>&1 || \
-        dtc -I dts -O dtb -o meson-g12b-xiaoyi-pro.dtb meson-g12b-xiaoyi-pro.preprocessed.dts 2>&1 || true
+        # 方法1: 使用内核的 DTC 编译
+        echo "=== Method 1: Using kernel DTC ==="
+        /tmp/linux-amlogic/scripts/dtc/dtc -I dts -O dtb \
+          -o meson-g12b-xiaoyi-pro.dtb \
+          meson-g12b-xiaoyi-pro.preprocessed.dts 2>&1 || true
         
-        # 如果编译成功，反编译验证
+        # 方法2: 使用系统 DTC
+        if [ ! -f meson-g12b-xiaoyi-pro.dtb ]; then
+          echo "=== Method 2: Using system DTC ==="
+          dtc -I dts -O dtb \
+            -o meson-g12b-xiaoyi-pro.dtb \
+            meson-g12b-xiaoyi-pro.preprocessed.dts 2>&1 || true
+        fi
+        
+        # 方法3: 直接编译原始文件
+        if [ ! -f meson-g12b-xiaoyi-pro.dtb ]; then
+          echo "=== Method 3: Direct compile ==="
+          dtc -I dts -O dtb \
+            -o meson-g12b-xiaoyi-pro.dtb \
+            meson-g12b-xiaoyi-pro.dts 2>&1 || true
+        fi
+        
+        # 检查结果
         if [ -f meson-g12b-xiaoyi-pro.dtb ]; then
-          dtc -I dtb -O dts -o meson-g12b-xiaoyi-pro.decompiled.dts meson-g12b-xiaoyi-pro.dtb
           echo "=== Compilation successful ==="
+          dtc -I dtb -O dts -o meson-g12b-xiaoyi-pro.decompiled.dts meson-g12b-xiaoyi-pro.dtb
           ls -la *.dtb
+          file meson-g12b-xiaoyi-pro.dtb
         else
-          echo "=== Compilation failed, creating placeholder ==="
+          echo "=== Compilation failed ==="
+          echo "Creating error log..."
           echo "DTB compilation failed. Please check the DTS syntax." > COMPILE_ERROR.txt
+          # 显示预处理后的错误行
+          grep -n "Error" meson-g12b-xiaoyi-pro.preprocessed.dts | head -20 || true
         fi
 
     - name: List output files
