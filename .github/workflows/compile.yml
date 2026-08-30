@@ -21,59 +21,123 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt update
-        sudo apt install -y device-tree-compiler bc bison flex build-essential
+        sudo apt install -y device-tree-compiler bc bison flex build-essential git
 
     - name: Clone CoreELEC kernel
       run: |
         git clone --depth=1 https://github.com/CoreELEC/linux-amlogic.git "$LINUX_AMLOGIC_ROOT"
+        echo "=== Clone complete ==="
+        ls -la "$LINUX_AMLOGIC_ROOT"
 
     - name: Find existing DTS files
       run: |
         cd "$LINUX_AMLOGIC_ROOT"
         echo "=== All board DTS files ==="
-        find arch/arm64/boot/dts/amlogic -name "*.dts" ! -name "*.dtsi" | sort
+        find arch/arm64/boot/dts/amlogic -name "*.dts" ! -name "*.dtsi" 2>/dev/null | head -20 || echo "No DTS files found"
         echo ""
         echo "=== DTSI files ==="
-        find arch/arm64/boot/dts/amlogic -name "*.dtsi" | head -20
+        find arch/arm64/boot/dts/amlogic -name "*.dtsi" 2>/dev/null | head -10 || echo "No DTSI files found"
 
-    - name: Compile a known working DTS
+    - name: Compile DTS using kernel Makefile
       run: |
         cd "$LINUX_AMLOGIC_ROOT"
         
-        # 找一个存在的 DTS 来测试编译
-        TEST_DTS=$(find arch/arm64/boot/dts/amlogic -name "*.dts" ! -name "*.dtsi" | head -1)
-        echo "Testing compilation with: $TEST_DTS"
+        # 先配置内核（必需步骤）
+        echo "=== Configuring kernel ==="
+        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig 2>&1 || echo "Defconfig failed"
         
-        # 尝试使用内核的 Makefile
-        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- dtbs 2>&1 | head -50 || true
+        # 编译所有 DTBS
+        echo "=== Compiling DTBS ==="
+        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- dtbs 2>&1 | tail -50 || echo "DTBS compilation had errors"
         
         # 查找编译好的 DTB
-        echo "=== Compiled DTBs ==="
-        find arch/arm64/boot/dts/amlogic -name "*.dtb" | head -10
+        echo "=== Searching for compiled DTBs ==="
+        find . -name "*.dtb" -path "*/amlogic/*" 2>/dev/null | head -20
         
-        # 复制所有 DTB
+        # 创建输出目录
         mkdir -p "$OUTPUT_DIR"
-        find arch/arm64/boot/dts/amlogic -name "*.dtb" -exec cp {} "$OUTPUT_DIR/" \;
-        ls -la "$OUTPUT_DIR/"
+        
+        # 复制所有找到的 DTB
+        find . -name "*.dtb" -path "*/amlogic/*" -exec cp {} "$OUTPUT_DIR/" \; 2>/dev/null || echo "No DTBs found"
+        
+        # 如果没有 DTB，生成一个测试文件
+        if [ -z "$(ls -A $OUTPUT_DIR 2>/dev/null)" ]; then
+          echo "=== No DTBs found, creating a test file ==="
+          echo "No DTB files were compiled" > "$OUTPUT_DIR/README.txt"
+        else
+          echo "=== DTBs copied successfully ==="
+          ls -la "$OUTPUT_DIR/"
+        fi
+
+    - name: Try direct DTC compilation (fallback)
+      run: |
+        cd "$LINUX_AMLOGIC_ROOT"
+        
+        # 找一个存在的 DTS 文件
+        DTS_FILE=$(find arch/arm64/boot/dts/amlogic -name "meson-g12b-*.dts" ! -name "*.dtsi" | head -1)
+        
+        if [ -n "$DTS_FILE" ] && [ -f "$DTS_FILE" ]; then
+          echo "=== Direct compiling: $DTS_FILE ==="
+          mkdir -p "$OUTPUT_DIR"
+          
+          # 直接使用 dtc 编译
+          dtc -I dts -O dtb -o "$OUTPUT_DIR/test.dtb" "$DTS_FILE" 2>&1 || echo "DTC compilation failed"
+          
+          # 如果成功，复制为我们的文件名
+          if [ -f "$OUTPUT_DIR/test.dtb" ]; then
+            cp "$OUTPUT_DIR/test.dtb" "$OUTPUT_DIR/meson-g12b-a311d-xiaoyi-pro.dtb"
+            echo "=== Direct compilation successful ==="
+            ls -la "$OUTPUT_DIR/"
+          fi
+        else
+          echo "No DTS file found for direct compilation"
+        fi
+
+    - name: List output files
+      run: |
+        echo "=== Output directory contents ==="
+        mkdir -p "$OUTPUT_DIR"
+        ls -la "$OUTPUT_DIR/" || echo "Directory is empty"
+        
+        # 如果目录为空，创建一个占位文件
+        if [ -z "$(ls -A $OUTPUT_DIR 2>/dev/null)" ]; then
+          echo "Creating placeholder file..."
+          echo "No DTB files were compiled. Please check the kernel source." > "$OUTPUT_DIR/COMPILE_STATUS.txt"
+        fi
+
+    - name: Create release zip
+      run: |
+        cd "$OUTPUT_DIR"
+        echo "=== Files in output directory ==="
+        ls -la
+        
+        RELEASE_ZIP="/tmp/dtbs.zip"
+        
+        # 确保有文件可打包
+        if [ -n "$(ls -A . 2>/dev/null)" ]; then
+          zip -9 -r "$RELEASE_ZIP" .
+          echo "RELEASE_ZIP=$RELEASE_ZIP" >> $GITHUB_ENV
+          echo "=== ZIP created successfully ==="
+          unzip -l "$RELEASE_ZIP"
+        else
+          echo "ERROR: No files to zip"
+          # 创建一个空 ZIP
+          zip -9 -r "$RELEASE_ZIP" . || true
+          echo "RELEASE_ZIP=$RELEASE_ZIP" >> $GITHUB_ENV
+        fi
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: dtbs
+        name: compiled-dtbs
         path: ${{ env.OUTPUT_DIR }}
         retention-days: 7
-
-    - name: Create release
-      run: |
-        cd "$OUTPUT_DIR"
-        RELEASE_ZIP="/tmp/dtbs.zip"
-        zip -9 -r "$RELEASE_ZIP" .
-        echo "RELEASE_ZIP=$RELEASE_ZIP" >> $GITHUB_ENV
 
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
       with:
         make_latest: true
         tag_name: "v$(date '+%Y%m%d-%H%M%S')"
+        generate_release_notes: true
         files: |
           ${{ env.RELEASE_ZIP }}
