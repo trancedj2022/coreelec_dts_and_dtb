@@ -1,52 +1,28 @@
-/dts-v1/;
-
-#include "meson-g12b-a311d.dtsi"
-
-/ {
-	model = "CAINIAO XiaoYi Pro";
-	compatible = "cainiao,xiaoyi-pro", "amlogic,a311d";
-
-	chosen {
-		bootargs = "root=LABEL=COREELEC rw console=ttyAML0,115200n8";
-	};
-
-	memory@0 {
-		device_type = "memory";
-		reg = <0x0 0x0 0x0 0xee6b2800>;
-	};
-};
-
-&uart_AO {
-	status = "okay";
-};
-
-&sd_emmc_c {
-	status = "okay";
-	bus-width = <8>;
-	non-removable;
-};
-
-&usb {
-	status = "okay";
-	dr_mode = "host";
-};
-
-ðmac {
-	status = "okay";
-};
-
-&hdmi_tx {
-	status = "okay";
-};
-
-&vpu {
-	status = "okay";
-};
-
-&fb {
-	status = "okay";
-};
-
-&watchdog {
-	status = "okay";
-};
+- name: Compile DTS using kernel Makefile
+  run: |
+    cd "$LINUX_AMLOGIC_ROOT"
+    
+    # 1. 首先查看有哪些可用的 A311D DTS
+    echo "=== Available A311D DTS files ==="
+    find arch/arm64/boot/dts/amlogic -name "*a311d*" | sort
+    
+    # 2. 如果没有我们的 DTS，复制过去
+    cp "${{ github.workspace }}/dts/meson-g12b-a311d-xiaoyi-pro-coreelec.dts" \
+       arch/arm64/boot/dts/amlogic/
+    
+    # 3. 查看 Makefile 中是否包含了这个文件
+    grep -i "xiaoyi" arch/arm64/boot/dts/amlogic/Makefile || \
+      echo "Not in Makefile, will compile manually"
+    
+    # 4. 使用内核的 dtbs 编译
+    make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+       dtbs 2>&1 | tee /tmp/build.log
+    
+    # 5. 查找编译好的 DTB
+    echo "=== Compiled DTBs ==="
+    find arch/arm64/boot/dts/amlogic -name "*.dtb" | sort
+    
+    # 6. 复制我们的 DTB 到输出目录
+    find arch/arm64/boot/dts/amlogic -name "*xiaoyi*.dtb" -exec cp {} "$OUTPUT_DIR/" \;
+    
+    ls -la "$OUTPUT_DIR/"
