@@ -42,115 +42,94 @@ jobs:
           git clone --depth=1 "$COMMON_DRIVERS_REPO" common_drivers
           echo "=== common_drivers cloned ==="
 
-      - name: Prepare DTS files in all required locations
+      - name: Prepare DTS files
         run: |
           cd linux-amlogic
           
-          # 1. 标准内核 DTS 目录
+          # 标准内核 DTS 目录
           KERNEL_DTS_DIR="arch/arm64/boot/dts/amlogic/"
           mkdir -p "$KERNEL_DTS_DIR"
           cp "${{ env.DTS_SOURCE }}" "$KERNEL_DTS_DIR/meson-g12b-xiaoyi-pro.dts"
-          echo "Copied to: $KERNEL_DTS_DIR"
+          echo "Copied DTS to: $KERNEL_DTS_DIR"
           
-          # 2. common_drivers 目录 (创建软链接指向标准目录)
+          # common_drivers 目录 (创建软链接指向标准目录的 dtsi 文件)
           COMMON_DTS_DIR="common_drivers/arch/arm64/boot/dts/amlogic/"
           mkdir -p "$COMMON_DTS_DIR"
-          # 复制 .dts 文件
           cp "${{ env.DTS_SOURCE }}" "$COMMON_DTS_DIR/meson-g12b-xiaoyi-pro.dts"
-          # 创建软链接指向标准目录的 .dtsi 文件
-          ln -sf ../../../../../arch/arm64/boot/dts/amlogic/meson-g12b-s922x.dtsi \
-            "$COMMON_DTS_DIR/meson-g12b-s922x.dtsi" 2>/dev/null || \
-          ln -sf ../../../../arch/arm64/boot/dts/amlogic/meson-g12b-s922x.dtsi \
-            "$COMMON_DTS_DIR/meson-g12b-s922x.dtsi" 2>/dev/null || true
-          echo "Created symlinks in: $COMMON_DTS_DIR"
           
-          # 3. 也复制到 common_drivers/dts/amlogic/ (备选路径)
-          COMMON_DTS_DIR2="common_drivers/dts/amlogic/"
-          mkdir -p "$COMMON_DTS_DIR2"
-          cp "${{ env.DTS_SOURCE }}" "$COMMON_DTS_DIR2/meson-g12b-xiaoyi-pro.dts" 2>/dev/null || true
+          # 创建软链接到标准目录的 dtsi 文件
+          cd "$COMMON_DTS_DIR"
+          for dtsi in meson-g12b-s922x.dtsi meson-g12b.dtsi meson-g12.dtsi meson-g12-common.dtsi; do
+            ln -sf ../../../../../arch/arm64/boot/dts/amlogic/$dtsi $dtsi 2>/dev/null || true
+          done
+          cd ../../../..
           
-          echo "=== DTS files in kernel tree ==="
+          echo "=== DTS files in tree ==="
           find . -name "meson-g12b-xiaoyi-pro.dts" 2>/dev/null
-          echo ""
-          echo "=== DTSI files in kernel tree ==="
-          find arch/arm64/boot/dts/amlogic -name "*.dtsi" 2>/dev/null | head -10
 
-      - name: Add DTB to Makefiles
+      - name: Compile DTB using dtc with preprocessing
         run: |
           cd linux-amlogic
           
-          # 内核 Makefile
-          KERNEL_MAKEFILE="arch/arm64/boot/dts/amlogic/Makefile"
-          if ! grep -q "meson-g12b-xiaoyi-pro" "$KERNEL_MAKEFILE"; then
-            echo "dtb-\$(CONFIG_ARCH_MESON) += meson-g12b-xiaoyi-pro.dtb" >> "$KERNEL_MAKEFILE"
-            echo "Added to kernel Makefile"
+          DTS_PATH="arch/arm64/boot/dts/amlogic/meson-g12b-xiaoyi-pro.dts"
+          
+          if [ ! -f "$DTS_PATH" ]; then
+            echo "❌ DTS file not found!"
+            exit 1
           fi
           
-          # common_drivers Makefile
-          COMMON_MAKEFILE="common_drivers/arch/arm64/boot/dts/amlogic/Makefile"
-          mkdir -p "$(dirname "$COMMON_MAKEFILE")"
-          if [ ! -f "$COMMON_MAKEFILE" ]; then
-            echo "# CoreELEC common_drivers DTS Makefile" > "$COMMON_MAKEFILE"
-          fi
-          if ! grep -q "meson-g12b-xiaoyi-pro" "$COMMON_MAKEFILE"; then
-            echo "dtb-\$(CONFIG_ARCH_MESON) += meson-g12b-xiaoyi-pro.dtb" >> "$COMMON_MAKEFILE"
-            echo "Added to common_drivers Makefile"
-          fi
-
-      - name: Compile DTB using kernel build system
-        run: |
-          cd linux-amlogic
+          echo "=== Preprocessing DTS with cpp ==="
           
-          # 配置内核 (只生成 .config)
-          echo "=== Configuring kernel ==="
-          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig
+          # 使用 cpp 预处理，展开所有 #include
+          cpp -nostdinc -undef -x assembler-with-cpp \
+            -I arch/arm64/boot/dts \
+            -I arch/arm64/boot/dts/amlogic \
+            -I include \
+            -I common_drivers/include \
+            "$DTS_PATH" > meson-g12b-xiaoyi-pro.preprocessed.dts 2>&1 || true
           
-          # 编译 DTB
-          echo "=== Compiling DTB ==="
-          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
-            meson-g12b-xiaoyi-pro.dtb 2>&1 | tee /tmp/build.log || {
-            echo "Kernel build failed, checking if DTB was generated anyway..."
+          # 检查预处理结果
+          if [ -s "meson-g12b-xiaoyi-pro.preprocessed.dts" ]; then
+            echo "✅ Preprocessing successful"
+            echo "=== Preprocessed DTS (first 30 lines) ==="
+            head -30 meson-g12b-xiaoyi-pro.preprocessed.dts
+          else
+            echo "⚠️ Preprocessing produced empty file, trying direct compilation..."
+            cp "$DTS_PATH" meson-g12b-xiaoyi-pro.preprocessed.dts
+          fi
+          
+          echo "=== Compiling with dtc ==="
+          
+          # 使用 dtc 编译预处理后的文件
+          dtc -I dts -O dtb \
+            -i arch/arm64/boot/dts/amlogic \
+            -i arch/arm64/boot/dts \
+            -i include \
+            -i common_drivers/include \
+            -o meson-g12b-xiaoyi-pro.dtb \
+            meson-g12b-xiaoyi-pro.preprocessed.dts 2>&1 || {
+            echo "⚠️ dtc with preprocessed failed, trying with original DTS..."
+            
+            # 备选：直接用 dtc 编译原始文件（可能失败）
+            dtc -I dts -O dtb \
+              -i arch/arm64/boot/dts/amlogic \
+              -i arch/arm64/boot/dts \
+              -i include \
+              -i common_drivers/include \
+              -o meson-g12b-xiaoyi-pro.dtb \
+              "$DTS_PATH" 2>&1 || true
           }
           
-          # 查找生成的 DTB
-          echo "=== Searching for DTB ==="
-          find . -name "meson-g12b-xiaoyi-pro.dtb" 2>/dev/null
-          
-          # 复制到工作区
-          DTB_PATH=$(find . -name "meson-g12b-xiaoyi-pro.dtb" 2>/dev/null | head -n 1)
-          if [ -n "$DTB_PATH" ]; then
-            cp "$DTB_PATH" meson-g12b-xiaoyi-pro.dtb
-            echo "DTB_FILE=meson-g12b-xiaoyi-pro.dtb" >> $GITHUB_ENV
-            echo "✅ DTB found and copied!"
+          # 检查结果
+          if [ -f "meson-g12b-xiaoyi-pro.dtb" ]; then
+            echo "✅ DTB compiled successfully!"
             ls -la meson-g12b-xiaoyi-pro.dtb
+            echo "DTB_FILE=meson-g12b-xiaoyi-pro.dtb" >> $GITHUB_ENV
           else
-            echo "⚠️ Kernel build didn't generate DTB, trying direct dtc compilation..."
-            
-            # 备用方案：直接使用 dtc 编译
-            DTS_PATH=$(find arch/arm64/boot/dts/amlogic -name "meson-g12b-xiaoyi-pro.dts" 2>/dev/null | head -n 1)
-            if [ -z "$DTS_PATH" ]; then
-              DTS_PATH=$(find common_drivers -name "meson-g12b-xiaoyi-pro.dts" 2>/dev/null | head -n 1)
-            fi
-            
-            if [ -n "$DTS_PATH" ] && [ -f "$DTS_PATH" ]; then
-              echo "Found DTS at: $DTS_PATH"
-              # 使用 dtc 直接编译，添加必要的 include 路径
-              dtc -I dts -O dtb \
-                -i arch/arm64/boot/dts/amlogic \
-                -i arch/arm64/boot/dts \
-                -i include \
-                -i common_drivers/include \
-                -o meson-g12b-xiaoyi-pro.dtb \
-                "$DTS_PATH" 2>&1 || true
-              
-              if [ -f "meson-g12b-xiaoyi-pro.dtb" ]; then
-                echo "DTB_FILE=meson-g12b-xiaoyi-pro.dtb" >> $GITHUB_ENV
-                echo "✅ DTB compiled successfully with dtc!"
-              fi
-            else
-              echo "❌ No DTS file found for direct compilation"
-              exit 1
-            fi
+            echo "❌ DTB compilation failed!"
+            echo "=== Preprocessed DTS (last 50 lines) ==="
+            tail -50 meson-g12b-xiaoyi-pro.preprocessed.dts
+            exit 1
           fi
 
       - name: Verify DTB
@@ -165,8 +144,11 @@ jobs:
               meson-g12b-xiaoyi-pro.dtb 2>/dev/null || echo "Decompilation skipped"
             
             if [ -f "meson-g12b-xiaoyi-pro.decompiled.dts" ]; then
-              echo "=== Decompiled DTS (first 20 lines) ==="
-              head -20 meson-g12b-xiaoyi-pro.decompiled.dts
+              echo "=== Decompiled DTS (first 30 lines) ==="
+              head -30 meson-g12b-xiaoyi-pro.decompiled.dts
+              echo ""
+              echo "=== DTB structure ==="
+              dtc -I dtb -O dts --sort meson-g12b-xiaoyi-pro.dtb 2>/dev/null | head -50 || true
             fi
           else
             echo "❌ No DTB file to verify"
@@ -180,6 +162,7 @@ jobs:
           path: |
             meson-g12b-xiaoyi-pro.dtb
             meson-g12b-xiaoyi-pro.decompiled.dts
+            meson-g12b-xiaoyi-pro.preprocessed.dts
           retention-days: 7
 
       - name: Create Release
