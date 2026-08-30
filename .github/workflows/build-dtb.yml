@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - 'dts/*.dts'  # 当 dts 文件夹下的文件有更新时自动触发
+      - 'dts/*.dts'
 
 permissions:
   contents: write
@@ -12,10 +12,7 @@ permissions:
 env:
   PROJECT: Amlogic-ce
   DEVICE: Amlogic-ng
-  ARCH: arm
   COREELEC_REPO: https://github.com/CoreELEC/CoreELEC.git
-  LINUX_REPO: https://github.com/CoreELEC/linux-amlogic.git
-  # 假设你的 dts 文件在仓库根目录的 dts/ 文件夹下
   DTS_SOURCE: ${{ github.workspace }}/dts/meson-g12b-xiaoyi-pro.dts
 
 jobs:
@@ -25,7 +22,7 @@ jobs:
       - name: Checkout your repository
         uses: actions/checkout@v4
         with:
-          path: my_repo # 将你的仓库克隆到子目录，避免与 CoreELEC 主仓库冲突
+          path: my_repo
 
       - name: Install build dependencies
         run: |
@@ -40,95 +37,59 @@ jobs:
       - name: Clone CoreELEC kernel repository
         run: |
           cd CoreELEC
-          # 克隆内核仓库到 CoreELEC 源码中的指定位置
+          # 克隆内核仓库到标准位置
           git clone --depth=1 "$LINUX_REPO" projects/$PROJECT/devices/$DEVICE/linux
 
-      - name: Create custom device-tree package
+      - name: Inject custom DTS into kernel source
         run: |
           cd CoreELEC
-          # 1. 创建用于构建自定义 dtb 的 package 目录
-          PKG_DIR="projects/$PROJECT/devices/$DEVICE/packages/device-tree-xiaoyi"
-          mkdir -p "$PKG_DIR"
+          KERNEL_DTS_DIR="projects/$PROJECT/devices/$DEVICE/linux/arch/arm64/boot/dts/amlogic/"
+          mkdir -p "$KERNEL_DTS_DIR"
+          
+          # 复制你的 DTS 文件到内核设备树目录，并替换默认文件（如果存在）
+          cp "${{ env.DTS_SOURCE }}" "$KERNEL_DTS_DIR/meson-g12b-xiaoyi-pro.dts"
+          
+          # 编辑内核的 Makefile，添加你的 dtb 到编译列表
+          KERNEL_MAKEFILE="projects/$PROJECT/devices/$DEVICE/linux/arch/arm64/boot/dts/amlogic/Makefile"
+          if ! grep -q "meson-g12b-xiaoyi-pro" "$KERNEL_MAKEFILE"; then
+            echo "dtb-\$(CONFIG_ARCH_MESON) += meson-g12b-xiaoyi-pro.dtb" >> "$KERNEL_MAKEFILE"
+          fi
 
-          # 2. 创建 package.mk 文件
-          cat > "$PKG_DIR/package.mk" << 'EOF'
-          ################################################################################
-          # package.mk for custom device-tree-xiaoyi
-          ################################################################################
-          PKG_NAME="device-tree-xiaoyi"
-          PKG_VERSION="1"
-          PKG_SITE=""
-          PKG_URL=""
-          PKG_DEPENDS_TARGET="toolchain"
-          PKG_DEPENDS_UNPACK="linux"
-          PKG_LONGDESC="Custom device tree for CAINIAO XiaoYi Pro"
-          PKG_IS_KERNEL_PKG="yes"
-          PKG_TOOLCHAIN="manual"
-
-          # 指定 DTS 文件的绝对路径
-          DTS_PATH="${{ env.DTS_SOURCE }}"
-          PKG_NEED_UNPACK="${DTS_PATH}"
-
-          make_target() {
-            pushd "$(get_build_dir linux)" > /dev/null
-              # 将你的 dts 文件复制到内核的 amlogic 设备树目录
-              cp -f "${DTS_PATH}" "arch/${TARGET_KERNEL_ARCH}/boot/dts/amlogic/"
-              DTB_NAME="$(basename "${DTS_PATH}" .dts).dtb"
-              # 调用内核构建系统编译该 dtb
-              kernel_make "${DTB_NAME}"
-              # 将生成的 dtb 复制到 package 的构建目录
-              cp "arch/${TARGET_KERNEL_ARCH}/boot/dts/amlogic/${DTB_NAME}" "${PKG_BUILD}/"
-            popd > /dev/null
-          }
-
-          makeinstall_target() {
-            : # 不需要安装到镜像中，只提取 dtb 文件
-          }
-          EOF
-
-      - name: Build the custom device tree
-      # 通过 scripts/build 命令构建我们刚刚创建的 package
+      - name: Build the entire kernel package
         run: |
           cd CoreELEC
-          ./scripts/build device-tree-xiaoyi
+          # 构建整个内核包，这会自动编译所有包含的 dtb 文件
+          ./scripts/build kernel
 
-      - name: Locate and prepare DTB for release
+      - name: Locate and extract custom DTB
         id: prepare_dtb
         run: |
           cd CoreELEC
-          # 查找生成的 dtb 文件
-          DTB_PATH=$(find . -path "*/device-tree-xiaoyi-*/*.dtb" -name "meson-g12b-xiaoyi-pro.dtb" | head -n 1)
+          # 在构建输出目录中查找生成的 dtb 文件
+          DTB_PATH=$(find ./build.* -path "*/amlogic/meson-g12b-xiaoyi-pro.dtb" | head -n 1)
           
           if [ -z "$DTB_PATH" ]; then
-            echo "::error::DTB file not found!"
+            echo "::error::Custom DTB file not found in build output!"
             exit 1
           fi
           
-          # 将 dtb 文件复制到工作区根目录，并重命名
+          # 将 dtb 文件复制到工作区根目录
           cp "$DTB_PATH" meson-g12b-xiaoyi-pro.dtb
-          
-          # 同时复制一份原始的 dts 文件到根目录，方便对比和记录
-          cp "${{ env.DTS_SOURCE }}" meson-g12b-xiaoyi-pro.dts
-          
           echo "DTB_FILE=meson-g12b-xiaoyi-pro.dtb" >> $GITHUB_ENV
-          echo "DTS_FILE=meson-g12b-xiaoyi-pro.dts" >> $GITHUB_ENV
-          echo "::notice::DTB file found and prepared: $DTB_PATH"
+          echo "::notice::Custom DTB file found and prepared: $DTB_PATH"
 
       - name: Upload DTB as Artifact
         uses: actions/upload-artifact@v4
         with:
           name: xiaoyi-pro-dtb
-          path: |
-            ${{ env.DTB_FILE }}
-            ${{ env.DTS_FILE }}
+          path: ${{ env.DTB_FILE }}
           retention-days: 7
 
       - name: Create Release
-        id: create_release
         run: |
           RELEASE_TAG="v$(date +'%Y%m%d-%H%M%S')"
           echo "RELEASE_TAG=$RELEASE_TAG" >> $GITHUB_ENV
-          zip -9 xiaoyi-pro-dtb.zip ${{ env.DTB_FILE }} ${{ env.DTS_FILE }}
+          zip -9 xiaoyi-pro-dtb.zip ${{ env.DTB_FILE }}
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
