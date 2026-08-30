@@ -11,7 +11,6 @@ permissions:
 
 env:
   LINUX_AMLOGIC_GIT: https://github.com/CoreELEC/linux-amlogic.git
-  LINUX_AMLOGIC_BRANCH: master
   LINUX_AMLOGIC_ROOT: /tmp/linux-amlogic
   OUTPUT_DIR: /tmp/output
 
@@ -26,298 +25,249 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt update
-        sudo apt install -y device-tree-compiler git bc bison flex \
-          build-essential python3 python3-dev
+        sudo apt install -y device-tree-compiler git bc bison flex build-essential
 
     - name: Clone CoreELEC kernel 5.15
       run: |
-        echo "=== Cloning CoreELEC kernel (5.15 branch) ==="
-        git clone --depth=1 --branch=meson-5.15 \
-          "$LINUX_AMLOGIC_GIT" "$LINUX_AMLOGIC_ROOT"
-        
+        git clone --depth=1 --branch=meson-5.15 "$LINUX_AMLOGIC_GIT" "$LINUX_AMLOGIC_ROOT"
         cd "$LINUX_AMLOGIC_ROOT"
-        echo "=== Kernel version ==="
-        head -5 Makefile
-        echo "=== Available DTSI files ==="
-        ls -la arch/arm64/boot/dts/amlogic/*.dtsi | head -10
+        echo "Kernel version:"
+        head -3 Makefile
 
-    - name: Copy DTS to kernel tree
+    - name: Create DTS file in kernel tree
       run: |
         DTS_DIR="$LINUX_AMLOGIC_ROOT/arch/arm64/boot/dts/amlogic"
         
-        # 如果 dts 文件在仓库中，从仓库复制
-        if [ -f "${{ github.workspace }}/dts/meson-g12b-xiaoyi-pro.dts" ]; then
-          echo "=== Copying DTS from repository ==="
-          cp "${{ github.workspace }}/dts/meson-g12b-xiaoyi-pro.dts" "$DTS_DIR/"
-        else
-          echo "=== Creating DTS file ==="
-          cat > "$DTS_DIR/meson-g12b-xiaoyi-pro.dts" << "EOF"
-/dts-v1/;
-
-#include "meson-g12b-s922x.dtsi"
-#include <dt-bindings/gpio/gpio.h>
-#include <dt-bindings/input/input.h>
-#include <dt-bindings/interrupt-controller/irq.h>
-#include <dt-bindings/interrupt-controller/arm-gic.h>
-
-/ {
-    model = "CAINIAO XiaoYi Pro";
-    compatible = "cainiao,xiaoyi-pro", "amlogic,s922x";
-
-    chosen {
-        bootargs = "root=LABEL=COREELEC rw console=ttyAML0,115200n8 console=tty0 no_console_suspend";
-    };
-
-    memory@0 {
-        device_type = "memory";
-        reg = <0x0 0x0 0x0 0xee6b2800>;
-    };
-
-    dc_in: regulator-dc-in {
-        compatible = "regulator-fixed";
-        regulator-name = "dc_in";
-        regulator-always-on;
-        regulator-boot-on;
-    };
-
-    vsys_3v3: regulator-vsys-3v3 {
-        compatible = "regulator-fixed";
-        regulator-name = "vsys_3v3";
-        regulator-always-on;
-        regulator-boot-on;
-        regulator-min-microvolt = <3300000>;
-        regulator-max-microvolt = <3300000>;
-        vin-supply = <&dc_in>;
-    };
-
-    vddao_1v8: regulator-vddao-1v8 {
-        compatible = "regulator-fixed";
-        regulator-name = "vddao_1v8";
-        regulator-always-on;
-        regulator-boot-on;
-        regulator-min-microvolt = <1800000>;
-        regulator-max-microvolt = <1800000>;
-        vin-supply = <&dc_in>;
-    };
-
-    host_vbus: regulator-host-vbus {
-        compatible = "regulator-fixed";
-        regulator-name = "host_vbus";
-        regulator-always-on;
-        regulator-boot-on;
-        gpio = <&gpio GPIOH_5 GPIO_ACTIVE_HIGH>;
-        enable-active-high;
-    };
-
-    vdd_amp: regulator-vdd-amp {
-        compatible = "regulator-fixed";
-        regulator-name = "vdd_amp";
-        regulator-always-on;
-        regulator-boot-on;
-    };
-
-    gpio_fan: gpio-fan {
-        compatible = "gpio-fan";
-        gpios = <&gpio_ao GPIOAO_11 GPIO_ACTIVE_HIGH>;
-        gpio-fan,speed-map = <0 0 3000 1>;
-        #cooling-cells = <2>;
-    };
-
-    adc_keys: adc-keys {
-        compatible = "adc-keys";
-        io-channels = <&saradc 2>;
-        io-channel-names = "buttons";
-        keyup-threshold-microvolt = <1700000>;
-        poll-interval = <100>;
-
-        button-recovery {
-            label = "Recovery";
-            linux,code = <KEY_RESTART>;
-            press-threshold-microvolt = <10000>;
-        };
-    };
-
-    speaker_amplifier: speaker-amplifier {
-        compatible = "simple-audio-amplifier";
-        sound-name-prefix = "Speaker Amplifier";
-        VCC-supply = <&vdd_amp>;
-        enable-gpios = <&gpio GPIOH_5 GPIO_ACTIVE_HIGH>;
-    };
-
-    wifi32k: wifi32k {
-        compatible = "pwm-clock";
-        #clock-cells = <0>;
-        clock-frequency = <32768>;
-        pwms = <&pwm_ef 0 30518 0>;
-    };
-
-    sdio_pwrseq: sdio-pwrseq {
-        compatible = "mmc-pwrseq-simple";
-        clocks = <&wifi32k>;
-        clock-names = "ext_clock";
-        reset-gpios = <&gpio GPIOX_7 GPIO_ACTIVE_LOW>;
-    };
-};
-
-&sd_emmc_c {
-    status = "okay";
-    bus-width = <8>;
-    non-removable;
-    cap-mmc-highspeed;
-    mmc-ddr-1_8v;
-    mmc-hs200-1_8v;
-    max-frequency = <200000000>;
-    vmmc-supply = <&vsys_3v3>;
-    vqmmc-supply = <&vddao_1v8>;
-};
-
-&sd_emmc_a {
-    status = "okay";
-    bus-width = <4>;
-    cap-sd-highspeed;
-    sd-uhs-ddr50;
-    max-frequency = <200000000>;
-    non-removable;
-    keep-power-in-suspend;
-    vmmc-supply = <&vsys_3v3>;
-    vqmmc-supply = <&vddao_1v8>;
-    mmc-pwrseq = <&sdio_pwrseq>;
-};
-
-&uart_AO { status = "okay"; };
-&usb { status = "okay"; dr_mode = "host"; };
-&usb2_phy0 { status = "okay"; phy-supply = <&vsys_3v3>; };
-&usb2_phy1 { status = "okay"; phy-supply = <&host_vbus>; };
-ðmac { status = "okay"; phy-mode = "rgmii"; };
-&hdmi_tx { status = "okay"; };
-&vpu { status = "okay"; };
-&fb { status = "okay"; };
-&cec_AO { status = "okay"; };
-&ir { status = "okay"; };
-&pwm_ab { status = "okay"; };
-&pwm_ef { status = "okay"; };
-&pwm_AO_cd { status = "okay"; };
-&saradc { status = "okay"; vref-supply = <&vddao_1v8>; };
-&watchdog { status = "okay"; };
-&vrtc { status = "okay"; };
-
-&cpu_thermal {
-    polling-delay = <1000>;
-    polling-delay-passive = <100>;
-
-    trips {
-        cpu_passive: cpu-passive {
-            temperature = <85000>;
-            hysteresis = <2000>;
-            type = "passive";
-        };
-    };
-
-    cooling-maps {
-        map {
-            trip = <&cpu_passive>;
-            cooling-device = <&gpio_fan 1 1>;
-        };
-    };
-};
-
-&i2c1 {
-    status = "okay";
-    led-controller@45 {
-        compatible = "awinic,aw2013";
-        reg = <0x45>;
-        #address-cells = <1>;
-        #size-cells = <0>;
-
-        led@0 { reg = <0>; led-max-microamp = <5000>; };
-        led@1 { reg = <1>; led-max-microamp = <5000>; };
-        led@2 { reg = <2>; led-max-microamp = <5000>; };
-    };
-};
-
-&i2c2 {
-    status = "okay";
-    rtc@68 {
-        compatible = "dallas,ds1307";
-        reg = <0x68>;
-    };
-};
-EOF
-        fi
+        cat > "$DTS_DIR/meson-g12b-xiaoyi-pro.dts" << "EOF"
+        /dts-v1/;
         
-        echo "=== DTS file in kernel tree ==="
+        #include "meson-g12b-s922x.dtsi"
+        #include <dt-bindings/gpio/gpio.h>
+        #include <dt-bindings/input/input.h>
+        #include <dt-bindings/interrupt-controller/irq.h>
+        #include <dt-bindings/interrupt-controller/arm-gic.h>
+        
+        / {
+            model = "CAINIAO XiaoYi Pro";
+            compatible = "cainiao,xiaoyi-pro", "amlogic,s922x";
+        
+            chosen {
+                bootargs = "root=LABEL=COREELEC rw console=ttyAML0,115200n8 console=tty0 no_console_suspend";
+            };
+        
+            memory@0 {
+                device_type = "memory";
+                reg = <0x0 0x0 0x0 0xee6b2800>;
+            };
+        
+            dc_in: regulator-dc-in {
+                compatible = "regulator-fixed";
+                regulator-name = "dc_in";
+                regulator-always-on;
+                regulator-boot-on;
+            };
+        
+            vsys_3v3: regulator-vsys-3v3 {
+                compatible = "regulator-fixed";
+                regulator-name = "vsys_3v3";
+                regulator-always-on;
+                regulator-boot-on;
+                regulator-min-microvolt = <3300000>;
+                regulator-max-microvolt = <3300000>;
+                vin-supply = <&dc_in>;
+            };
+        
+            vddao_1v8: regulator-vddao-1v8 {
+                compatible = "regulator-fixed";
+                regulator-name = "vddao_1v8";
+                regulator-always-on;
+                regulator-boot-on;
+                regulator-min-microvolt = <1800000>;
+                regulator-max-microvolt = <1800000>;
+                vin-supply = <&dc_in>;
+            };
+        
+            host_vbus: regulator-host-vbus {
+                compatible = "regulator-fixed";
+                regulator-name = "host_vbus";
+                regulator-always-on;
+                regulator-boot-on;
+                gpio = <&gpio GPIOH_5 GPIO_ACTIVE_HIGH>;
+                enable-active-high;
+            };
+        
+            vdd_amp: regulator-vdd-amp {
+                compatible = "regulator-fixed";
+                regulator-name = "vdd_amp";
+                regulator-always-on;
+                regulator-boot-on;
+            };
+        
+            gpio_fan: gpio-fan {
+                compatible = "gpio-fan";
+                gpios = <&gpio_ao GPIOAO_11 GPIO_ACTIVE_HIGH>;
+                gpio-fan,speed-map = <0 0 3000 1>;
+                #cooling-cells = <2>;
+            };
+        
+            adc_keys: adc-keys {
+                compatible = "adc-keys";
+                io-channels = <&saradc 2>;
+                io-channel-names = "buttons";
+                keyup-threshold-microvolt = <1700000>;
+                poll-interval = <100>;
+        
+                button-recovery {
+                    label = "Recovery";
+                    linux,code = <KEY_RESTART>;
+                    press-threshold-microvolt = <10000>;
+                };
+            };
+        
+            speaker_amplifier: speaker-amplifier {
+                compatible = "simple-audio-amplifier";
+                sound-name-prefix = "Speaker Amplifier";
+                VCC-supply = <&vdd_amp>;
+                enable-gpios = <&gpio GPIOH_5 GPIO_ACTIVE_HIGH>;
+            };
+        
+            wifi32k: wifi32k {
+                compatible = "pwm-clock";
+                #clock-cells = <0>;
+                clock-frequency = <32768>;
+                pwms = <&pwm_ef 0 30518 0>;
+            };
+        
+            sdio_pwrseq: sdio-pwrseq {
+                compatible = "mmc-pwrseq-simple";
+                clocks = <&wifi32k>;
+                clock-names = "ext_clock";
+                reset-gpios = <&gpio GPIOX_7 GPIO_ACTIVE_LOW>;
+            };
+        };
+        
+        &sd_emmc_c {
+            status = "okay";
+            bus-width = <8>;
+            non-removable;
+            cap-mmc-highspeed;
+            mmc-ddr-1_8v;
+            mmc-hs200-1_8v;
+            max-frequency = <200000000>;
+            vmmc-supply = <&vsys_3v3>;
+            vqmmc-supply = <&vddao_1v8>;
+        };
+        
+        &sd_emmc_a {
+            status = "okay";
+            bus-width = <4>;
+            cap-sd-highspeed;
+            sd-uhs-ddr50;
+            max-frequency = <200000000>;
+            non-removable;
+            keep-power-in-suspend;
+            vmmc-supply = <&vsys_3v3>;
+            vqmmc-supply = <&vddao_1v8>;
+            mmc-pwrseq = <&sdio_pwrseq>;
+        };
+        
+        &uart_AO { status = "okay"; };
+        &usb { status = "okay"; dr_mode = "host"; };
+        &usb2_phy0 { status = "okay"; phy-supply = <&vsys_3v3>; };
+        &usb2_phy1 { status = "okay"; phy-supply = <&host_vbus>; };
+        ðmac { status = "okay"; phy-mode = "rgmii"; };
+        &hdmi_tx { status = "okay"; };
+        &vpu { status = "okay"; };
+        &fb { status = "okay"; };
+        &cec_AO { status = "okay"; };
+        &ir { status = "okay"; };
+        &pwm_ab { status = "okay"; };
+        &pwm_ef { status = "okay"; };
+        &pwm_AO_cd { status = "okay"; };
+        &saradc { status = "okay"; vref-supply = <&vddao_1v8>; };
+        &watchdog { status = "okay"; };
+        &vrtc { status = "okay"; };
+        
+        &cpu_thermal {
+            polling-delay = <1000>;
+            polling-delay-passive = <100>;
+        
+            trips {
+                cpu_passive: cpu-passive {
+                    temperature = <85000>;
+                    hysteresis = <2000>;
+                    type = "passive";
+                };
+            };
+        
+            cooling-maps {
+                map {
+                    trip = <&cpu_passive>;
+                    cooling-device = <&gpio_fan 1 1>;
+                };
+            };
+        };
+        
+        &i2c1 {
+            status = "okay";
+            led-controller@45 {
+                compatible = "awinic,aw2013";
+                reg = <0x45>;
+                #address-cells = <1>;
+                #size-cells = <0>;
+        
+                led@0 { reg = <0>; led-max-microamp = <5000>; };
+                led@1 { reg = <1>; led-max-microamp = <5000>; };
+                led@2 { reg = <2>; led-max-microamp = <5000>; };
+            };
+        };
+        
+        &i2c2 {
+            status = "okay";
+            rtc@68 {
+                compatible = "dallas,ds1307";
+                reg = <0x68>;
+            };
+        };
+        EOF
+        
+        echo "DTS file created:"
         ls -la "$DTS_DIR/meson-g12b-xiaoyi-pro.dts"
 
     - name: Add DTS to Makefile
       run: |
         DTS_DIR="$LINUX_AMLOGIC_ROOT/arch/arm64/boot/dts/amlogic"
         cd "$DTS_DIR"
-        
-        if ! grep -q "meson-g12b-xiaoyi-pro" Makefile 2>/dev/null; then
+        if ! grep -q "meson-g12b-xiaoyi-pro" Makefile; then
           echo "dtb-\$(CONFIG_ARCH_MESON) += meson-g12b-xiaoyi-pro.dtb" >> Makefile
-          echo "=== Added to Makefile ==="
-        else
-          echo "=== Already in Makefile ==="
         fi
 
-    - name: Compile DTB with kernel Makefile
+    - name: Compile DTB
       run: |
         cd "$LINUX_AMLOGIC_ROOT"
+        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig
+        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- meson-g12b-xiaoyi-pro.dtb
         
-        # 配置内核
-        echo "=== Configuring kernel ==="
-        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig 2>&1 | tail -10
-        
-        # 编译 DTB
-        echo "=== Compiling DTB ==="
-        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
-          meson-g12b-xiaoyi-pro.dtb 2>&1 | tee /tmp/build.log
-        
-        # 查找编译结果
-        echo "=== Looking for compiled DTB ==="
-        find . -name "meson-g12b-xiaoyi-pro.dtb" 2>/dev/null
-        
-        # 复制到输出目录
         mkdir -p "$OUTPUT_DIR"
-        find . -name "meson-g12b-xiaoyi-pro.dtb" -exec cp {} "$OUTPUT_DIR/" \; 2>/dev/null || echo "DTB not found"
-
-    - name: Decompile DTB (if exists)
-      run: |
+        find . -name "meson-g12b-xiaoyi-pro.dtb" -exec cp {} "$OUTPUT_DIR/" \;
+        
         if [ -f "$OUTPUT_DIR/meson-g12b-xiaoyi-pro.dtb" ]; then
-          echo "=== Decompiling DTB for verification ==="
+          echo "Compilation successful!"
           dtc -I dtb -O dts -o "$OUTPUT_DIR/meson-g12b-xiaoyi-pro.decompiled.dts" \
-            "$OUTPUT_DIR/meson-g12b-xiaoyi-pro.dtb" 2>/dev/null || true
-          ls -la "$OUTPUT_DIR/"
+            "$OUTPUT_DIR/meson-g12b-xiaoyi-pro.dtb"
         else
-          echo "=== No DTB to decompile ==="
-          echo "Build log tail:"
-          tail -50 /tmp/build.log
-          echo "DTB compilation failed." > "$OUTPUT_DIR/ERROR.txt"
+          echo "Compilation failed"
+          exit 1
         fi
-
-    - name: List output files
-      run: |
-        echo "=== Output directory ==="
-        ls -la "$OUTPUT_DIR/" || echo "Directory empty"
 
     - name: Create release zip
       run: |
         cd "$OUTPUT_DIR"
         RELEASE_ZIP="/tmp/dtbs.zip"
-        zip -9 -r "$RELEASE_ZIP" . 2>/dev/null || true
+        zip -9 -r "$RELEASE_ZIP" .
         echo "RELEASE_ZIP=$RELEASE_ZIP" >> $GITHUB_ENV
-        echo "=== ZIP contents ==="
-        unzip -l "$RELEASE_ZIP" 2>/dev/null || echo "ZIP creation failed"
-
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: dtb-files
-        path: ${{ env.OUTPUT_DIR }}
-        retention-days: 7
 
     - name: Set release tag
-      id: vars
       run: |
         TAG_NAME="v$(date +'%Y%m%d-%H%M%S')"
         echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
