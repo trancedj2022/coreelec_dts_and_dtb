@@ -2,17 +2,16 @@
 
 #include "meson-g12b-a311d.dtsi"
 #include <dt-bindings/input/input.h>
-#include <dt-bindings/gpio/meson-g12a-gpio.h>
-#include <dt-bindings/clock/g12b-clkc.h>
-#include <dt-bindings/power/meson-g12a-power.h>
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/interrupt-controller/irq.h>
+#include <dt-bindings/interrupt-controller/arm-gic.h>
 
 / {
 	model = "CAINIAO XiaoYi Pro";
 	compatible = "cainiao,xiaoyi-pro", "amlogic,a311d";
 
 	chosen {
-		bootargs = "root=LABEL=COREELEC rootflags=data=writeback rw rootfstype=ext4 console=ttyAML0,115200n8 console=tty0 no_console_suspend consoleblank=0 fsck.fix=yes fsck.repair=yes net.ifnames=0 max_loop=128 cgroup_enable=cpuset cgroup_memory=1 cgroup_enable=memory swapaccount=1 plymouth.enable=0";
-		stdout-path = "serial0:115200n8";
+		bootargs = "root=LABEL=COREELEC rootflags=data=writeback rw rootfstype=ext4 console=ttyAML0,115200n8 console=tty0 no_console_suspend consoleblank=0 fsck.fix=yes fsck.repair=yes net.ifnames=0 max_loop=128";
 	};
 
 	memory@0 {
@@ -26,10 +25,8 @@
 		mmc1 = &sd_emmc_b;
 		mmc2 = &sd_emmc_a;
 		rtc0 = &vrtc;
-		rtc1 = &rtc_ds1307;
 	};
 
-	/* ==================== 电源 ==================== */
 	dc_in: regulator-dc-in {
 		compatible = "regulator-fixed";
 		regulator-name = "dc_in";
@@ -96,7 +93,6 @@
 		vin-supply = <&dc_in>;
 	};
 
-	/* ==================== WiFi 32K 时钟 ==================== */
 	wifi32k: wifi32k {
 		compatible = "pwm-clock";
 		#clock-cells = <0>;
@@ -104,7 +100,6 @@
 		pwms = <&pwm_ef 0 30518 0>;
 	};
 
-	/* ==================== SDIO 电源序列 ==================== */
 	sdio_pwrseq: sdio-pwrseq {
 		compatible = "mmc-pwrseq-simple";
 		clocks = <&wifi32k>;
@@ -112,13 +107,6 @@
 		reset-gpios = <&gpio GPIOX_7 GPIO_ACTIVE_LOW>;
 	};
 
-	/* ==================== eMMC 电源序列 ==================== */
-	emmc_pwrseq: emmc-pwrseq {
-		compatible = "mmc-pwrseq-emmc";
-		reset-gpios = <&gpio BOOT_5 GPIO_ACTIVE_LOW>;
-	};
-
-	/* ==================== GPIO 风扇 ==================== */
 	gpio_fan: gpio-fan {
 		compatible = "gpio-fan";
 		gpios = <&gpio_ao GPIOAO_11 GPIO_ACTIVE_HIGH>;
@@ -126,7 +114,6 @@
 		#cooling-cells = <2>;
 	};
 
-	/* ==================== ADC 按键 (Recovery) ==================== */
 	adc_keys: adc-keys {
 		compatible = "adc-keys";
 		io-channels = <&saradc 2>;
@@ -141,26 +128,14 @@
 		};
 	};
 
-	/* ==================== 音频放大器 ==================== */
 	speaker_amplifier: speaker-amplifier {
 		compatible = "simple-audio-amplifier";
 		sound-name-prefix = "Speaker Amplifier";
 		VCC-supply = <&regulator-vdd-amp>;
-		enable-gpios = <&gpio GPIOH_5 GPIO_ACTIVE_HIGH>;  /* 原GPIOH_5 (pin 21) */
-	};
-
-	/* ==================== AW2013 LED 控制器 (I2C) ==================== */
-	/* 在 I2C 节点下定义 */
-	/* 多色 LED 组 */
-	multi-led {
-		compatible = "leds-group-multicolor";
-		function = "indicator";
-		color = <9>;  /* RGB */
-		leds = <&led0>, <&led1>, <&led2>;
+		enable-gpios = <&gpio GPIOH_5 GPIO_ACTIVE_HIGH>;
 	};
 };
 
-/* ==================== eMMC ==================== */
 &sd_emmc_c {
 	status = "okay";
 	pinctrl-0 = <&emmc_ctrl_pins>, <&emmc_data_8b_pins>, <&emmc_ds_pins>;
@@ -174,10 +149,8 @@
 	non-removable;
 	vmmc-supply = <&vsys_3v3>;
 	vqmmc-supply = <&vddao_1v8>;
-	mmc-pwrseq = <&emmc_pwrseq>;
 };
 
-/* ==================== SDIO (WiFi) ==================== */
 &sd_emmc_a {
 	status = "okay";
 	pinctrl-0 = <&sdio_pins>;
@@ -192,19 +165,12 @@
 	vmmc-supply = <&vsys_3v3>;
 	vqmmc-supply = <&vddao_1v8>;
 	mmc-pwrseq = <&sdio_pwrseq>;
-
-	wifi@1 {
-		reg = <1>;
-		compatible = "brcm,bcm4329-fmac";
-	};
 };
 
-/* ==================== SD 卡槽 (如果有) ==================== */
 &sd_emmc_b {
-	status = "disabled";  /* 根据实际硬件启用 */
+	status = "disabled";
 };
 
-/* ==================== UART ==================== */
 &uart_AO {
 	status = "okay";
 	pinctrl-0 = <&uart_ao_a_pins>;
@@ -216,26 +182,16 @@
 	pinctrl-0 = <&uart_a_pins>, <&uart_a_cts_rts_pins>;
 	pinctrl-names = "default";
 	uart-has-rtscts;
-
-	bluetooth {
-		compatible = "realtek,rtl8822cs-bt", "realtek,rtl8723bs-bt";
-		enable-gpios = <&gpio GPIOX_18 GPIO_ACTIVE_HIGH>;
-		host-wake-gpios = <&gpio GPIOX_19 GPIO_ACTIVE_HIGH>;
-	};
 };
 
-/* ==================== I2C ==================== */
-/* I2C-A (AO) - 可能未使用 */
 &i2c_AO {
 	status = "disabled";
 };
 
-/* I2C0 - 未使用 */
 &i2c0 {
 	status = "disabled";
 };
 
-/* I2C1 - AW2013 LED 控制器 */
 &i2c1 {
 	status = "okay";
 	pinctrl-0 = <&i2c1_sda_h6_pins>, <&i2c1_sck_h7_pins>;
@@ -249,40 +205,32 @@
 
 		led0: led@0 {
 			reg = <0>;
-			function = "indicator";
-			color = <1>;  /* 红 */
 			led-max-microamp = <5000>;
 		};
 
 		led1: led@1 {
 			reg = <1>;
-			function = "indicator";
-			color = <2>;  /* 绿 */
 			led-max-microamp = <5000>;
 		};
 
 		led2: led@2 {
 			reg = <2>;
-			function = "indicator";
-			color = <3>;  /* 蓝 */
 			led-max-microamp = <5000>;
 		};
 	};
 };
 
-/* I2C2 - DS1307 RTC */
 &i2c2 {
 	status = "okay";
 	pinctrl-0 = <&i2c2_sck_x_pins>, <&i2c2_sda_x_pins>;
 	pinctrl-names = "default";
 
-	rtc_ds1307: rtc@68 {
+	rtc@68 {
 		compatible = "dallas,ds1307";
 		reg = <0x68>;
 	};
 };
 
-/* ==================== USB ==================== */
 &usb {
 	status = "okay";
 	dr_mode = "host";
@@ -298,34 +246,21 @@
 	phy-supply = <&host_vbus>;
 };
 
-&usb3_pcie_phy {
-	status = "okay";
-};
-
-/* ==================== Ethernet ==================== */
 ðmac {
 	status = "okay";
 	pinctrl-0 = <ð_pins>, <ð_rgmii_pins>;
 	pinctrl-names = "default";
 	phy-mode = "rgmii";
 	phy-handle = <&external_phy>;
-	amlogic,tx-delay-ns = <2>;
 };
 
 &ext_mdio {
 	external_phy: ethernet-phy@0 {
 		reg = <0>;
 		max-speed = <1000>;
-		interrupt-parent = <&gpio_intc>;
-		interrupts = <8 IRQ_TYPE_LEVEL_LOW>;
-		reset-gpios = <&gpio GPIOZ_15 GPIO_ACTIVE_LOW>;
-		reset-assert-us = <10000>;
-		reset-deassert-us = <80000>;
-		realtek,led-data = <0xc160>;
 	};
 };
 
-/* ==================== HDMI ==================== */
 &hdmi_tx {
 	status = "okay";
 	pinctrl-0 = <&hdmitx_hpd_pins>, <&hdmitx_ddc_pins>;
@@ -336,47 +271,10 @@
 	status = "okay";
 };
 
-/* CoreELEC Framebuffer */
 &fb {
 	status = "okay";
 };
 
-/* ==================== 音频 ==================== */
-&sound {
-	compatible = "amlogic,aml-sound-card";
-	model = "CAINIAO-XIAOYI-PRO";
-	status = "okay";
-	audio-aux-devs = <&tdmout_a &tdmout_b &speaker_amplifier>;
-	audio-routing = "Speaker Amplifier INL", "ACODEC LOLP",
-			"Speaker Amplifier INR", "ACODEC LORP",
-			"Internal Speaker", "Speaker Amplifier OUTL",
-			"Internal Speaker", "Speaker Amplifier OUTR";
-
-	/* TDM A -> ACODEC (Speaker) */
-	aml-audio-card,dai-link@0 {
-		format = "i2s";
-		mclk-fs = <256>;
-		cpu {
-			sound-dai = <&tdmif_a>;
-		};
-		codec {
-			sound-dai = <&acodec>;
-		};
-	};
-
-	/* TDM B -> HDMI */
-	aml-audio-card,dai-link@1 {
-		format = "i2s";
-		cpu {
-			sound-dai = <&tdmif_b>;
-		};
-		codec {
-			sound-dai = <&hdmi_tx>;
-		};
-	};
-};
-
-/* ==================== CEC ==================== */
 &cec_AO {
 	status = "okay";
 	pinctrl-0 = <&cec_ao_a_h_pins>;
@@ -384,20 +282,16 @@
 	hdmi-phandle = <&hdmi_tx>;
 };
 
-/* ==================== IR 红外接收 ==================== */
 &ir {
 	status = "okay";
 	pinctrl-0 = <&remote_input_ao_pins>;
 	pinctrl-names = "default";
 };
 
-/* ==================== PWM ==================== */
 &pwm_ab {
 	status = "okay";
 	pinctrl-0 = <&pwm_a_e_pins>;
 	pinctrl-names = "default";
-	clocks = <&xtal>;
-	clock-names = "clkin0";
 };
 
 &pwm_ef {
@@ -410,17 +304,13 @@
 	status = "okay";
 	pinctrl-0 = <&pwm_ao_d_e_pins>;
 	pinctrl-names = "default";
-	clocks = <&xtal>;
-	clock-names = "clkin1";
 };
 
-/* ==================== ADC ==================== */
 &saradc {
 	status = "okay";
 	vref-supply = <&vddao_1v8>;
 };
 
-/* ==================== 温控 (原 thermal-zones) ==================== */
 &cpu_thermal {
 	polling-delay = <1000>;
 	polling-delay-passive = <100>;
@@ -432,18 +322,6 @@
 			hysteresis = <2000>;
 			type = "passive";
 		};
-
-		cpu_hot: cpu-hot {
-			temperature = <95000>;
-			hysteresis = <2000>;
-			type = "hot";
-		};
-
-		cpu_critical: cpu-critical {
-			temperature = <110000>;
-			hysteresis = <2000>;
-			type = "critical";
-		};
 	};
 
 	cooling-maps {
@@ -454,30 +332,14 @@
 	};
 };
 
-/* ==================== 看门狗 ==================== */
 &watchdog {
 	status = "okay";
 };
 
-/* ==================== RTC (VRTC) ==================== */
 &vrtc {
 	status = "okay";
 };
 
-/* ==================== 安全监控 ==================== */
 &sm {
 	status = "okay";
 };
-
-/* ==================== EFUSE ==================== */
-&efuse {
-	status = "okay";
-};
-
-/* ==================== 移除或禁用 Armbian 特有节点 ==================== */
-/* 这些节点在 CoreELEC 中不需要或已重新定义 */
-
-/* 移除原来的 gpio-fan 定义 (已在上方重新定义) */
-/delete-node/ &gpio_fan;  /* 如果原 DTS 有定义 */
-
-/* 保留所有其他未修改的节点 */
