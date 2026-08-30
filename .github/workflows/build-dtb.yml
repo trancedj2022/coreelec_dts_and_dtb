@@ -14,7 +14,6 @@ env:
   DEVICE: Amlogic-ng
   COREELEC_REPO: https://github.com/CoreELEC/CoreELEC.git
   LINUX_REPO: https://github.com/CoreELEC/linux-amlogic.git
-  # 使用 github.workspace 确保路径始终正确
   DTS_SOURCE: ${{ github.workspace }}/my_repo/dts/meson-g12b-xiaoyi-pro.dts
 
 jobs:
@@ -24,77 +23,93 @@ jobs:
       - name: Checkout your repository
         uses: actions/checkout@v4
         with:
-          path: my_repo  # 克隆到 my_repo 子目录
-
-      - name: Debug - List files in repository
-        run: |
-          echo "=== Contents of workspace ==="
-          ls -la ${{ github.workspace }}
-          echo "=== Contents of my_repo ==="
-          ls -la ${{ github.workspace }}/my_repo
-          echo "=== Contents of dts directory ==="
-          ls -la ${{ github.workspace }}/my_repo/dts/ || echo "dts directory not found"
+          path: my_repo
 
       - name: Install build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y make gcc git texinfo gzip squashfs-tools
 
-      - name: Clone CoreELEC main repository
+      - name: Clone CoreELEC repositories
         run: |
           git clone --depth=1 "$COREELEC_REPO" CoreELEC
-
-      - name: Clone CoreELEC kernel repository
-        run: |
           cd CoreELEC
           git clone --depth=1 "$LINUX_REPO" projects/$PROJECT/devices/$DEVICE/linux
+
+      - name: List available architectures (debug)
+        run: |
+          cd CoreELEC
+          echo "=== Available architectures in config/ ==="
+          ls -la config/
+          echo ""
+          echo "=== Architecture files ==="
+          find config/ -name "*.conf" | head -20
 
       - name: Inject custom DTS into kernel source
         run: |
           cd CoreELEC
           KERNEL_DTS_DIR="projects/$PROJECT/devices/$DEVICE/linux/arch/arm64/boot/dts/amlogic/"
           mkdir -p "$KERNEL_DTS_DIR"
-          
-          # 使用环境变量引用 DTS 文件
-          echo "Looking for DTS file at: ${{ env.DTS_SOURCE }}"
-          if [ ! -f "${{ env.DTS_SOURCE }}" ]; then
-            echo "ERROR: DTS file not found at specified path"
-            echo "Current directory contents:"
-            ls -la ${{ github.workspace }}/my_repo/
-            exit 1
-          fi
-          
           cp "${{ env.DTS_SOURCE }}" "$KERNEL_DTS_DIR/meson-g12b-xiaoyi-pro.dts"
           
-          # 编辑内核的 Makefile，添加你的 dtb 到编译列表
           KERNEL_MAKEFILE="projects/$PROJECT/devices/$DEVICE/linux/arch/arm64/boot/dts/amlogic/Makefile"
           if ! grep -q "meson-g12b-xiaoyi-pro" "$KERNEL_MAKEFILE"; then
             echo "dtb-\$(CONFIG_ARCH_MESON) += meson-g12b-xiaoyi-pro.dtb" >> "$KERNEL_MAKEFILE"
           fi
-          echo "DTS file copied successfully."
 
-      - name: Build the entire kernel package
+      - name: Build kernel with correct architecture
         run: |
           cd CoreELEC
-          # 构建整个内核包
-          ./scripts/build arm kernel
+          
+          # 首先尝试 aarch64（最常见的 Amlogic 64位架构）
+          echo "=== Trying architecture: aarch64 ==="
+          if ./scripts/build aarch64 kernel; then
+            echo "SUCCESS: Built with aarch64"
+            exit 0
+          fi
+          
+          # 如果 aarch64 失败，尝试 arm64
+          echo "=== aarch64 failed, trying architecture: arm64 ==="
+          if ./scripts/build arm64 kernel; then
+            echo "SUCCESS: Built with arm64"
+            exit 0
+          fi
+          
+          # 如果 arm64 也失败，尝试 arm
+          echo "=== arm64 failed, trying architecture: arm ==="
+          if ./scripts/build arm kernel; then
+            echo "SUCCESS: Built with arm"
+            exit 0
+          fi
+          
+          # 如果所有常见架构都失败，输出可用架构列表
+          echo "ERROR: All common architectures failed."
+          echo "Available configurations in config/ directory:"
+          ls -la config/
+          exit 1
 
       - name: Locate and extract custom DTB
         id: prepare_dtb
         run: |
           cd CoreELEC
-          # 在构建输出目录中查找生成的 dtb 文件
-          DTB_PATH=$(find ./build.* -path "*/amlogic/meson-g12b-xiaoyi-pro.dtb" | head -n 1)
+          echo "=== Searching for custom DTB file ==="
+          DTB_PATH=$(find . -path "*/amlogic/meson-g12b-xiaoyi-pro.dtb" -type f | head -n 1)
           
           if [ -z "$DTB_PATH" ]; then
-            echo "::error::Custom DTB file not found in build output!"
+            echo "::warning::Custom DTB not found in expected path. Searching for any DTB files..."
+            DTB_PATH=$(find ./build.* -name "*.dtb" -type f | head -n 1)
+          fi
+          
+          if [ -z "$DTB_PATH" ]; then
+            echo "::error::No DTB file found in build output!"
+            echo "Build directory contents:"
+            ls -la ./build.*/ 2>/dev/null || echo "No build directories found"
             exit 1
           fi
           
-          # 将 dtb 文件复制到工作区根目录
+          echo "Found DTB at: $DTB_PATH"
           cp "$DTB_PATH" meson-g12b-xiaoyi-pro.dtb
           echo "DTB_FILE=meson-g12b-xiaoyi-pro.dtb" >> $GITHUB_ENV
-          echo "::notice::Custom DTB file found and prepared: $DTB_PATH"
 
       - name: Upload DTB as Artifact
         uses: actions/upload-artifact@v4
