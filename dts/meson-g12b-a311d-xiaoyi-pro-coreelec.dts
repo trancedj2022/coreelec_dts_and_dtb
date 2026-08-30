@@ -1,17 +1,13 @@
 /dts-v1/;
 
 #include "meson-g12b-a311d.dtsi"
-#include <dt-bindings/input/input.h>
-#include <dt-bindings/gpio/gpio.h>
-#include <dt-bindings/interrupt-controller/irq.h>
-#include <dt-bindings/interrupt-controller/arm-gic.h>
 
 / {
 	model = "CAINIAO XiaoYi Pro";
 	compatible = "cainiao,xiaoyi-pro", "amlogic,a311d";
 
 	chosen {
-		bootargs = "root=LABEL=COREELEC rootflags=data=writeback rw rootfstype=ext4 console=ttyAML0,115200n8 console=tty0 no_console_suspend consoleblank=0 fsck.fix=yes fsck.repair=yes net.ifnames=0 max_loop=128";
+		bootargs = "root=LABEL=COREELEC rw console=ttyAML0,115200n8 console=tty0 no_console_suspend";
 	};
 
 	memory@0 {
@@ -24,7 +20,6 @@
 		mmc0 = &sd_emmc_c;
 		mmc1 = &sd_emmc_b;
 		mmc2 = &sd_emmc_a;
-		rtc0 = &vrtc;
 	};
 
 	dc_in: regulator-dc-in {
@@ -54,23 +49,6 @@
 		vin-supply = <&dc_in>;
 	};
 
-	regulator-vdd-amp {
-		compatible = "regulator-fixed";
-		regulator-name = "vdd_amp";
-		regulator-always-on;
-		regulator-boot-on;
-		vin-supply = <&dc_in>;
-	};
-
-	host_vbus: regulator-host-vbus {
-		compatible = "regulator-fixed";
-		regulator-name = "host_vbus";
-		regulator-always-on;
-		regulator-boot-on;
-		gpio = <&gpio GPIOH_5 GPIO_ACTIVE_HIGH>;
-		enable-active-high;
-	};
-
 	vddcpu_a: regulator-vddcpu-a {
 		compatible = "pwm-regulator";
 		pwms = <&pwm_ab 0 1250 0>;
@@ -78,7 +56,6 @@
 		regulator-min-microvolt = <690000>;
 		regulator-max-microvolt = <1050000>;
 		regulator-always-on;
-		pwm-dutycycle-range = <100 0>;
 		vin-supply = <&dc_in>;
 	};
 
@@ -89,22 +66,16 @@
 		regulator-min-microvolt = <690000>;
 		regulator-max-microvolt = <1050000>;
 		regulator-always-on;
-		pwm-dutycycle-range = <100 0>;
 		vin-supply = <&dc_in>;
 	};
 
-	wifi32k: wifi32k {
-		compatible = "pwm-clock";
-		#clock-cells = <0>;
-		clock-frequency = <32768>;
-		pwms = <&pwm_ef 0 30518 0>;
-	};
-
-	sdio_pwrseq: sdio-pwrseq {
-		compatible = "mmc-pwrseq-simple";
-		clocks = <&wifi32k>;
-		clock-names = "ext_clock";
-		reset-gpios = <&gpio GPIOX_7 GPIO_ACTIVE_LOW>;
+	host_vbus: regulator-host-vbus {
+		compatible = "regulator-fixed";
+		regulator-name = "host_vbus";
+		regulator-always-on;
+		regulator-boot-on;
+		gpio = <&gpio GPIOH_5 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
 	};
 
 	gpio_fan: gpio-fan {
@@ -128,17 +99,39 @@
 		};
 	};
 
+	wifi32k: wifi32k {
+		compatible = "pwm-clock";
+		#clock-cells = <0>;
+		clock-frequency = <32768>;
+		pwms = <&pwm_ef 0 30518 0>;
+	};
+
+	sdio_pwrseq: sdio-pwrseq {
+		compatible = "mmc-pwrseq-simple";
+		clocks = <&wifi32k>;
+		clock-names = "ext_clock";
+		reset-gpios = <&gpio GPIOX_7 GPIO_ACTIVE_LOW>;
+	};
+
 	speaker_amplifier: speaker-amplifier {
 		compatible = "simple-audio-amplifier";
 		sound-name-prefix = "Speaker Amplifier";
 		VCC-supply = <&regulator-vdd-amp>;
 		enable-gpios = <&gpio GPIOH_5 GPIO_ACTIVE_HIGH>;
 	};
+
+	regulator-vdd-amp {
+		compatible = "regulator-fixed";
+		regulator-name = "vdd_amp";
+		regulator-always-on;
+		regulator-boot-on;
+		vin-supply = <&dc_in>;
+	};
 };
 
 &sd_emmc_c {
 	status = "okay";
-	pinctrl-0 = <&emmc_ctrl_pins>, <&emmc_data_8b_pins>, <&emmc_ds_pins>;
+	pinctrl-0 = <&emmc_ctrl_pins &emmc_data_8b_pins &emmc_ds_pins>;
 	pinctrl-1 = <&emmc_clk_gate_pins>;
 	pinctrl-names = "default", "clk-gate";
 	bus-width = <8>;
@@ -167,68 +160,10 @@
 	mmc-pwrseq = <&sdio_pwrseq>;
 };
 
-&sd_emmc_b {
-	status = "disabled";
-};
-
 &uart_AO {
 	status = "okay";
 	pinctrl-0 = <&uart_ao_a_pins>;
 	pinctrl-names = "default";
-};
-
-&uart_A {
-	status = "okay";
-	pinctrl-0 = <&uart_a_pins>, <&uart_a_cts_rts_pins>;
-	pinctrl-names = "default";
-	uart-has-rtscts;
-};
-
-&i2c_AO {
-	status = "disabled";
-};
-
-&i2c0 {
-	status = "disabled";
-};
-
-&i2c1 {
-	status = "okay";
-	pinctrl-0 = <&i2c1_sda_h6_pins>, <&i2c1_sck_h7_pins>;
-	pinctrl-names = "default";
-
-	led-controller@45 {
-		compatible = "awinic,aw2013";
-		reg = <0x45>;
-		#address-cells = <1>;
-		#size-cells = <0>;
-
-		led0: led@0 {
-			reg = <0>;
-			led-max-microamp = <5000>;
-		};
-
-		led1: led@1 {
-			reg = <1>;
-			led-max-microamp = <5000>;
-		};
-
-		led2: led@2 {
-			reg = <2>;
-			led-max-microamp = <5000>;
-		};
-	};
-};
-
-&i2c2 {
-	status = "okay";
-	pinctrl-0 = <&i2c2_sck_x_pins>, <&i2c2_sda_x_pins>;
-	pinctrl-names = "default";
-
-	rtc@68 {
-		compatible = "dallas,ds1307";
-		reg = <0x68>;
-	};
 };
 
 &usb {
@@ -248,7 +183,7 @@
 
 ðmac {
 	status = "okay";
-	pinctrl-0 = <ð_pins>, <ð_rgmii_pins>;
+	pinctrl-0 = <ð_pins &eth_rgmii_pins>;
 	pinctrl-names = "default";
 	phy-mode = "rgmii";
 	phy-handle = <&external_phy>;
@@ -263,7 +198,7 @@
 
 &hdmi_tx {
 	status = "okay";
-	pinctrl-0 = <&hdmitx_hpd_pins>, <&hdmitx_ddc_pins>;
+	pinctrl-0 = <&hdmitx_hpd_pins &hdmitx_ddc_pins>;
 	pinctrl-names = "default";
 };
 
@@ -279,7 +214,6 @@
 	status = "okay";
 	pinctrl-0 = <&cec_ao_a_h_pins>;
 	pinctrl-names = "default";
-	hdmi-phandle = <&hdmi_tx>;
 };
 
 &ir {
@@ -309,27 +243,6 @@
 &saradc {
 	status = "okay";
 	vref-supply = <&vddao_1v8>;
-};
-
-&cpu_thermal {
-	polling-delay = <1000>;
-	polling-delay-passive = <100>;
-	thermal-sensors = <&cpu_temp>;
-
-	trips {
-		cpu_passive: cpu-passive {
-			temperature = <85000>;
-			hysteresis = <2000>;
-			type = "passive";
-		};
-	};
-
-	cooling-maps {
-		map {
-			trip = <&cpu_passive>;
-			cooling-device = <&gpio_fan 1 1>;
-		};
-	};
 };
 
 &watchdog {
