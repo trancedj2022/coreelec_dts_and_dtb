@@ -211,20 +211,6 @@
     status = "okay";
 };
 
-/* ===== 温度传感器 - 一次性完整定义 ===== */
-&cpu_thermal {
-    polling-delay = <1000>;
-    polling-delay-passive = <100>;
-    
-    /* 添加风扇冷却映射，保留基础 dtsi 中已有的 trips */
-    cooling-maps {
-        fan_map {
-            trip = <&cpu_passive>;
-            cooling-device = <&gpio_fan 1 1>;
-        };
-    };
-};
-
 /* ===== I2C1: AW2013 LED ===== */
 &i2c1 {
     status = "okay";
@@ -259,3 +245,6 @@
         reg = <0x68>;
     };
 };
+
+/* 注意：不修改 cpu_thermal，使用基础 dtsi 中的定义 */
+/* 风扇冷却映射将在基础 dtsi 的 cooling-maps 中添加 */
