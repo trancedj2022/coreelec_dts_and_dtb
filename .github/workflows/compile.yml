@@ -29,8 +29,12 @@ jobs:
 
     - name: Clone CoreELEC kernel 5.15
       run: |
-        git clone --depth=1 --branch=meson-5.15 "$LINUX_AMLOGIC_GIT" "$LINUX_AMLOGIC_ROOT"
+        git clone --depth=1 "$LINUX_AMLOGIC_GIT" "$LINUX_AMLOGIC_ROOT" || \
+        (git clone --depth=1 --branch=5.15 "$LINUX_AMLOGIC_GIT" "$LINUX_AMLOGIC_ROOT" || \
+         git clone --depth=1 --branch=amlogic-5.15 "$LINUX_AMLOGIC_GIT" "$LINUX_AMLOGIC_ROOT")
         cd "$LINUX_AMLOGIC_ROOT"
+        echo "Current branch:"
+        git branch --show-current
         echo "Kernel version:"
         head -3 Makefile
 
