@@ -35,65 +35,113 @@ jobs:
           cd linux-amlogic
           echo "=== Kernel version ==="
           git log --oneline -1
-          echo ""
-          echo "=== Checking for common_drivers requirement ==="
-          grep -r "common_drivers" . 2>/dev/null | head -5 || echo "No reference found"
 
       - name: Clone common_drivers repository
         run: |
-          # common_drivers 必须放在内核源码树的 common_drivers 目录下
           cd linux-amlogic
           git clone --depth=1 "$COMMON_DRIVERS_REPO" common_drivers
           echo "=== common_drivers cloned ==="
           ls -la common_drivers/
 
-      - name: Copy DTS to kernel tree
+      - name: Copy DTS to both locations
         run: |
           cd linux-amlogic
           
-          # 复制 DTS 到内核设备树目录
-          cp "${{ env.DTS_SOURCE }}" arch/arm64/boot/dts/amlogic/meson-g12b-xiaoyi-pro.dts
-          echo "DTS file copied successfully."
+          # 位置1: 标准内核目录
+          KERNEL_DTS_DIR="arch/arm64/boot/dts/amlogic/"
+          mkdir -p "$KERNEL_DTS_DIR"
+          cp "${{ env.DTS_SOURCE }}" "$KERNEL_DTS_DIR/meson-g12b-xiaoyi-pro.dts"
+          echo "Copied to kernel DTS directory"
           
-          # 检查 Makefile 是否包含我们的 DTB
-          MAKE_FILE="arch/arm64/boot/dts/amlogic/Makefile"
-          if ! grep -q "meson-g12b-xiaoyi-pro" "$MAKE_FILE"; then
-            echo "dtb-\$(CONFIG_ARCH_MESON) += meson-g12b-xiaoyi-pro.dtb" >> "$MAKE_FILE"
-            echo "Added DTB to Makefile"
+          # 位置2: common_drivers 目录 (CoreELEC 实际使用的位置)
+          COMMON_DTS_DIR="common_drivers/arch/arm64/boot/dts/amlogic/"
+          mkdir -p "$COMMON_DTS_DIR"
+          cp "${{ env.DTS_SOURCE }}" "$COMMON_DTS_DIR/meson-g12b-xiaoyi-pro.dts"
+          echo "Copied to common_drivers DTS directory"
+          
+          # 位置3: common_drivers 的 dts 目录 (另一种可能的路径)
+          COMMON_DTS_DIR2="common_drivers/dts/amlogic/"
+          mkdir -p "$COMMON_DTS_DIR2"
+          cp "${{ env.DTS_SOURCE }}" "$COMMON_DTS_DIR2/meson-g12b-xiaoyi-pro.dts"
+          echo "Copied to common_drivers/dts/ directory"
+          
+          echo "=== DTS files copied ==="
+          find . -name "meson-g12b-xiaoyi-pro.dts" 2>/dev/null
+
+      - name: Add DTB to Makefiles
+        run: |
+          cd linux-amlogic
+          
+          # 添加到内核 Makefile
+          KERNEL_MAKEFILE="arch/arm64/boot/dts/amlogic/Makefile"
+          if ! grep -q "meson-g12b-xiaoyi-pro" "$KERNEL_MAKEFILE"; then
+            echo "dtb-\$(CONFIG_ARCH_MESON) += meson-g12b-xiaoyi-pro.dtb" >> "$KERNEL_MAKEFILE"
+            echo "Added to kernel Makefile"
           fi
           
-          echo "=== Makefile entries ==="
-          grep -i "xiaoyi" "$MAKE_FILE" || echo "No xiaoyi entry found"
+          # 添加到 common_drivers Makefile
+          COMMON_MAKEFILE="common_drivers/arch/arm64/boot/dts/amlogic/Makefile"
+          if [ -f "$COMMON_MAKEFILE" ]; then
+            if ! grep -q "meson-g12b-xiaoyi-pro" "$COMMON_MAKEFILE"; then
+              echo "dtb-\$(CONFIG_ARCH_MESON) += meson-g12b-xiaoyi-pro.dtb" >> "$COMMON_MAKEFILE"
+              echo "Added to common_drivers Makefile"
+            fi
+          else
+            # 如果 Makefile 不存在，创建一个
+            mkdir -p "$(dirname "$COMMON_MAKEFILE")"
+            echo "dtb-\$(CONFIG_ARCH_MESON) += meson-g12b-xiaoyi-pro.dtb" > "$COMMON_MAKEFILE"
+            echo "Created common_drivers Makefile"
+          fi
 
-      - name: Compile DTB directly
+      - name: Compile DTB
         run: |
           cd linux-amlogic
           
-          # 配置内核（现在 common_drivers 已存在）
+          # 配置内核
           echo "=== Configuring kernel ==="
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig
           
-          # 只编译我们的 DTB
+          # 尝试不同的编译目标
           echo "=== Compiling DTB ==="
+          
+          # 方法1: 直接编译 DTB (可能失败)
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
-            meson-g12b-xiaoyi-pro.dtb
+            meson-g12b-xiaoyi-pro.dtb 2>&1 || {
+            echo "Method 1 failed, trying method 2..."
+            
+            # 方法2: 使用 common_drivers 路径
+            cd common_drivers
+            make -f ../Makefile ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+              meson-g12b-xiaoyi-pro.dtb 2>&1 || {
+              echo "Method 2 failed, trying method 3..."
+              
+              # 方法3: 直接使用 dtc 编译 (备用方案)
+              cd ../../
+              echo "=== Using dtc directly ==="
+              dtc -I dts -O dtb -o meson-g12b-xiaoyi-pro.dtb \
+                arch/arm64/boot/dts/amlogic/meson-g12b-xiaoyi-pro.dts 2>&1 || \
+              dtc -I dts -O dtb -o meson-g12b-xiaoyi-pro.dtb \
+                common_drivers/arch/arm64/boot/dts/amlogic/meson-g12b-xiaoyi-pro.dts 2>&1 || \
+              dtc -I dts -O dtb -o meson-g12b-xiaoyi-pro.dtb \
+                common_drivers/dts/amlogic/meson-g12b-xiaoyi-pro.dts 2>&1 || true
+            }
+          }
           
           # 查找生成的 DTB
           echo "=== Searching for DTB ==="
-          find . -name "meson-g12b-xiaoyi-pro.dtb"
+          find . -name "meson-g12b-xiaoyi-pro.dtb" 2>/dev/null
           
           # 复制到工作区
-          DTB_PATH=$(find . -name "meson-g12b-xiaoyi-pro.dtb" | head -n 1)
+          DTB_PATH=$(find . -name "meson-g12b-xiaoyi-pro.dtb" 2>/dev/null | head -n 1)
           if [ -n "$DTB_PATH" ]; then
             cp "$DTB_PATH" meson-g12b-xiaoyi-pro.dtb
             echo "DTB_FILE=meson-g12b-xiaoyi-pro.dtb" >> $GITHUB_ENV
             echo "DTB found and copied!"
-            echo "DTB size:"
             ls -la meson-g12b-xiaoyi-pro.dtb
           else
             echo "::error::DTB file not found!"
             echo "Searching for any DTB files..."
-            find . -name "*.dtb" | head -10
+            find . -name "*.dtb" 2>/dev/null | head -10
             exit 1
           fi
 
@@ -104,9 +152,6 @@ jobs:
             echo "=== DTB info ==="
             file meson-g12b-xiaoyi-pro.dtb
             ls -la meson-g12b-xiaoyi-pro.dtb
-            echo ""
-            echo "=== Decompiled DTS (first 30 lines) ==="
-            head -30 meson-g12b-xiaoyi-pro.decompiled.dts 2>/dev/null || echo "No decompiled file"
           fi
 
       - name: Upload DTB as Artifact
