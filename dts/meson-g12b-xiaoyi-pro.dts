@@ -19,7 +19,6 @@
         reg = <0x0 0x0 0x0 0xee6b2800>;
     };
 
-    /* ===== 电源 ===== */
     dc_in: regulator-dc-in {
         compatible = "regulator-fixed";
         regulator-name = "dc_in";
@@ -63,7 +62,6 @@
         regulator-boot-on;
     };
 
-    /* ===== GPIO 风扇 ===== */
     gpio_fan: gpio-fan {
         compatible = "gpio-fan";
         gpios = <&gpio_ao GPIOAO_11 GPIO_ACTIVE_HIGH>;
@@ -71,7 +69,6 @@
         #cooling-cells = <2>;
     };
 
-    /* ===== ADC 按键 (Recovery) ===== */
     adc_keys: adc-keys {
         compatible = "adc-keys";
         io-channels = <&saradc 2>;
@@ -86,7 +83,6 @@
         };
     };
 
-    /* ===== 音频功放 ===== */
     speaker_amplifier: speaker-amplifier {
         compatible = "simple-audio-amplifier";
         sound-name-prefix = "Speaker Amplifier";
@@ -94,7 +90,6 @@
         enable-gpios = <&gpio GPIOH_5 GPIO_ACTIVE_HIGH>;
     };
 
-    /* ===== WiFi 32K 时钟 ===== */
     wifi32k: wifi32k {
         compatible = "pwm-clock";
         #clock-cells = <0>;
@@ -102,7 +97,6 @@
         pwms = <&pwm_ef 0 30518 0>;
     };
 
-    /* ===== SDIO 电源序列 ===== */
     sdio_pwrseq: sdio-pwrseq {
         compatible = "mmc-pwrseq-simple";
         clocks = <&wifi32k>;
@@ -111,7 +105,6 @@
     };
 };
 
-/* ===== eMMC ===== */
 &sd_emmc_c {
     status = "okay";
     bus-width = <8>;
@@ -124,7 +117,6 @@
     vqmmc-supply = <&vddao_1v8>;
 };
 
-/* ===== SDIO (WiFi) ===== */
 &sd_emmc_a {
     status = "okay";
     bus-width = <4>;
@@ -138,12 +130,10 @@
     mmc-pwrseq = <&sdio_pwrseq>;
 };
 
-/* ===== UART ===== */
 &uart_AO {
     status = "okay";
 };
 
-/* ===== USB ===== */
 &usb {
     status = "okay";
     dr_mode = "host";
@@ -159,13 +149,11 @@
     phy-supply = <&host_vbus>;
 };
 
-/* ===== 以太网 ===== */
 ðmac {
     status = "okay";
     phy-mode = "rgmii";
 };
 
-/* ===== HDMI ===== */
 &hdmi_tx {
     status = "okay";
 };
@@ -178,17 +166,14 @@
     status = "okay";
 };
 
-/* ===== CEC ===== */
 &cec_AO {
     status = "okay";
 };
 
-/* ===== IR 红外 ===== */
 &ir {
     status = "okay";
 };
 
-/* ===== PWM ===== */
 &pwm_ab {
     status = "okay";
 };
@@ -201,24 +186,23 @@
     status = "okay";
 };
 
-/* ===== ADC ===== */
 &saradc {
     status = "okay";
     vref-supply = <&vddao_1v8>;
 };
 
-/* ===== 看门狗 ===== */
 &watchdog {
     status = "okay";
 };
 
-/* ===== RTC ===== */
 &vrtc {
     status = "okay";
 };
 
-/* ===== 温度传感器 + 风扇联动 ===== */
+/* 删除 cpu_thermal 中已有的 cooling-maps，然后重新定义 */
 &cpu_thermal {
+    /delete-property/ cooling-maps;
+    
     polling-delay = <1000>;
     polling-delay-passive = <100>;
 
@@ -238,7 +222,6 @@
     };
 };
 
-/* ===== I2C1: AW2013 LED ===== */
 &i2c1 {
     status = "okay";
     led-controller@45 {
@@ -264,7 +247,6 @@
     };
 };
 
-/* ===== I2C2: DS1307 RTC ===== */
 &i2c2 {
     status = "okay";
     rtc@68 {
