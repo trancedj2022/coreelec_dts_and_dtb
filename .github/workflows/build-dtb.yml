@@ -13,8 +13,9 @@ env:
   PROJECT: Amlogic-ce
   DEVICE: Amlogic-ng
   COREELEC_REPO: https://github.com/CoreELEC/CoreELEC.git
-  LINUX_REPO: https://github.com/CoreELEC/linux-amlogic.git  # 添加这一行
-  DTS_SOURCE: ${{ github.workspace }}/dts/meson-g12b-xiaoyi-pro.dts
+  LINUX_REPO: https://github.com/CoreELEC/linux-amlogic.git
+  # 使用 github.workspace 确保路径始终正确
+  DTS_SOURCE: ${{ github.workspace }}/my_repo/dts/meson-g12b-xiaoyi-pro.dts
 
 jobs:
   build:
@@ -23,7 +24,16 @@ jobs:
       - name: Checkout your repository
         uses: actions/checkout@v4
         with:
-          path: my_repo
+          path: my_repo  # 克隆到 my_repo 子目录
+
+      - name: Debug - List files in repository
+        run: |
+          echo "=== Contents of workspace ==="
+          ls -la ${{ github.workspace }}
+          echo "=== Contents of my_repo ==="
+          ls -la ${{ github.workspace }}/my_repo
+          echo "=== Contents of dts directory ==="
+          ls -la ${{ github.workspace }}/my_repo/dts/ || echo "dts directory not found"
 
       - name: Install build dependencies
         run: |
@@ -33,12 +43,10 @@ jobs:
       - name: Clone CoreELEC main repository
         run: |
           git clone --depth=1 "$COREELEC_REPO" CoreELEC
-          cd CoreELEC
 
       - name: Clone CoreELEC kernel repository
         run: |
           cd CoreELEC
-          # 现在 $LINUX_REPO 有了正确的值
           git clone --depth=1 "$LINUX_REPO" projects/$PROJECT/devices/$DEVICE/linux
 
       - name: Inject custom DTS into kernel source
@@ -47,7 +55,15 @@ jobs:
           KERNEL_DTS_DIR="projects/$PROJECT/devices/$DEVICE/linux/arch/arm64/boot/dts/amlogic/"
           mkdir -p "$KERNEL_DTS_DIR"
           
-          # 复制你的 DTS 文件到内核设备树目录
+          # 使用环境变量引用 DTS 文件
+          echo "Looking for DTS file at: ${{ env.DTS_SOURCE }}"
+          if [ ! -f "${{ env.DTS_SOURCE }}" ]; then
+            echo "ERROR: DTS file not found at specified path"
+            echo "Current directory contents:"
+            ls -la ${{ github.workspace }}/my_repo/
+            exit 1
+          fi
+          
           cp "${{ env.DTS_SOURCE }}" "$KERNEL_DTS_DIR/meson-g12b-xiaoyi-pro.dts"
           
           # 编辑内核的 Makefile，添加你的 dtb 到编译列表
@@ -55,11 +71,12 @@ jobs:
           if ! grep -q "meson-g12b-xiaoyi-pro" "$KERNEL_MAKEFILE"; then
             echo "dtb-\$(CONFIG_ARCH_MESON) += meson-g12b-xiaoyi-pro.dtb" >> "$KERNEL_MAKEFILE"
           fi
+          echo "DTS file copied successfully."
 
       - name: Build the entire kernel package
         run: |
           cd CoreELEC
-          # 构建整个内核包，这会自动编译所有包含的 dtb 文件
+          # 构建整个内核包
           ./scripts/build kernel
 
       - name: Locate and extract custom DTB
