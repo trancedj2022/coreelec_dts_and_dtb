@@ -36,68 +36,67 @@ jobs:
           cd CoreELEC
           git clone --depth=1 "$LINUX_REPO" projects/$PROJECT/devices/$DEVICE/linux
 
-      - name: List available architectures (debug)
+      - name: List available configurations (debug)
         run: |
           cd CoreELEC
-          echo "=== Available architectures in config/ ==="
-          ls -la config/
+          echo "=== Available projects ==="
+          ls -la projects/
           echo ""
-          echo "=== Architecture files ==="
-          find config/ -name "*.conf" | head -20
+          echo "=== Available architectures ==="
+          ls -la config/arch.*
+          echo ""
+          echo "=== Device directory ==="
+          ls -la projects/$PROJECT/devices/$DEVICE/ 2>/dev/null || echo "Device directory not found"
 
       - name: Inject custom DTS into kernel source
         run: |
           cd CoreELEC
           KERNEL_DTS_DIR="projects/$PROJECT/devices/$DEVICE/linux/arch/arm64/boot/dts/amlogic/"
           mkdir -p "$KERNEL_DTS_DIR"
+          
+          if [ ! -f "${{ env.DTS_SOURCE }}" ]; then
+            echo "ERROR: DTS file not found at ${{ env.DTS_SOURCE }}"
+            echo "Contents of my_repo:"
+            ls -la ${{ github.workspace }}/my_repo/
+            exit 1
+          fi
+          
           cp "${{ env.DTS_SOURCE }}" "$KERNEL_DTS_DIR/meson-g12b-xiaoyi-pro.dts"
           
           KERNEL_MAKEFILE="projects/$PROJECT/devices/$DEVICE/linux/arch/arm64/boot/dts/amlogic/Makefile"
           if ! grep -q "meson-g12b-xiaoyi-pro" "$KERNEL_MAKEFILE"; then
             echo "dtb-\$(CONFIG_ARCH_MESON) += meson-g12b-xiaoyi-pro.dtb" >> "$KERNEL_MAKEFILE"
           fi
+          echo "DTS file injected successfully."
 
-      - name: Build kernel with correct architecture
+      - name: Build kernel package with correct project name
         run: |
           cd CoreELEC
           
-          # 首先尝试 aarch64（最常见的 Amlogic 64位架构）
-          echo "=== Trying architecture: aarch64 ==="
-          if ./scripts/build aarch64 kernel; then
-            echo "SUCCESS: Built with aarch64"
-            exit 0
-          fi
+          # 正确的用法：./scripts/build <project> [package]
+          echo "=== Building with project: $PROJECT ==="
+          ./scripts/build $PROJECT kernel
           
-          # 如果 aarch64 失败，尝试 arm64
-          echo "=== aarch64 failed, trying architecture: arm64 ==="
-          if ./scripts/build arm64 kernel; then
-            echo "SUCCESS: Built with arm64"
-            exit 0
-          fi
-          
-          # 如果 arm64 也失败，尝试 arm
-          echo "=== arm64 failed, trying architecture: arm ==="
-          if ./scripts/build arm kernel; then
-            echo "SUCCESS: Built with arm"
-            exit 0
-          fi
-          
-          # 如果所有常见架构都失败，输出可用架构列表
-          echo "ERROR: All common architectures failed."
-          echo "Available configurations in config/ directory:"
-          ls -la config/
-          exit 1
+          echo "=== Build completed ==="
 
       - name: Locate and extract custom DTB
         id: prepare_dtb
         run: |
           cd CoreELEC
+          
           echo "=== Searching for custom DTB file ==="
-          DTB_PATH=$(find . -path "*/amlogic/meson-g12b-xiaoyi-pro.dtb" -type f | head -n 1)
+          DTB_PATH=$(find . -path "*/amlogic/meson-g12b-xiaoyi-pro.dtb" -type f 2>/dev/null | head -n 1)
           
           if [ -z "$DTB_PATH" ]; then
             echo "::warning::Custom DTB not found in expected path. Searching for any DTB files..."
-            DTB_PATH=$(find ./build.* -name "*.dtb" -type f | head -n 1)
+            DTB_PATH=$(find . -name "meson-g12b*.dtb" -type f 2>/dev/null | head -n 1)
+          fi
+          
+          if [ -z "$DTB_PATH" ]; then
+            echo "::warning::No specific DTB found. Searching for all DTB files..."
+            find . -name "*.dtb" -type f 2>/dev/null | head -10
+            # 取第一个找到的 DTB 作为备选
+            DTB_PATH=$(find . -name "*.dtb" -type f 2>/dev/null | head -n 1)
           fi
           
           if [ -z "$DTB_PATH" ]; then
@@ -110,19 +109,30 @@ jobs:
           echo "Found DTB at: $DTB_PATH"
           cp "$DTB_PATH" meson-g12b-xiaoyi-pro.dtb
           echo "DTB_FILE=meson-g12b-xiaoyi-pro.dtb" >> $GITHUB_ENV
+          echo "::notice::DTB file prepared successfully"
+
+      - name: Decompile DTB for verification
+        run: |
+          if [ -f "meson-g12b-xiaoyi-pro.dtb" ]; then
+            dtc -I dtb -O dts -o meson-g12b-xiaoyi-pro.decompiled.dts meson-g12b-xiaoyi-pro.dtb 2>/dev/null || true
+            echo "DTB decompiled for verification."
+            ls -la *.dts *.dtb 2>/dev/null
+          fi
 
       - name: Upload DTB as Artifact
         uses: actions/upload-artifact@v4
         with:
           name: xiaoyi-pro-dtb
-          path: ${{ env.DTB_FILE }}
+          path: |
+            meson-g12b-xiaoyi-pro.dtb
+            meson-g12b-xiaoyi-pro.decompiled.dts
           retention-days: 7
 
       - name: Create Release
         run: |
           RELEASE_TAG="v$(date +'%Y%m%d-%H%M%S')"
           echo "RELEASE_TAG=$RELEASE_TAG" >> $GITHUB_ENV
-          zip -9 xiaoyi-pro-dtb.zip ${{ env.DTB_FILE }}
+          zip -9 xiaoyi-pro-dtb.zip meson-g12b-xiaoyi-pro.dtb meson-g12b-xiaoyi-pro.decompiled.dts 2>/dev/null || true
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
