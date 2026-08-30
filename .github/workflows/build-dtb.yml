@@ -77,7 +77,7 @@ jobs:
         run: |
           cd CoreELEC
           # 构建整个内核包
-          ./scripts/build kernel
+          ./scripts/build arm kernel
 
       - name: Locate and extract custom DTB
         id: prepare_dtb
