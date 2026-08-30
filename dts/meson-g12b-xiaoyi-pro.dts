@@ -211,16 +211,14 @@
     status = "okay";
 };
 
-/* ===== 温度传感器（不修改 cooling-maps，只设置 polling-delay） ===== */
+/* ===== 温度传感器 - 一次性完整定义 ===== */
 &cpu_thermal {
     polling-delay = <1000>;
     polling-delay-passive = <100>;
-};
-
-/* 单独添加风扇冷却映射，使用 &cpu_thermal 原有的 trips */
-&cpu_thermal {
+    
+    /* 添加风扇冷却映射，保留基础 dtsi 中已有的 trips */
     cooling-maps {
-        map0 {
+        fan_map {
             trip = <&cpu_passive>;
             cooling-device = <&gpio_fan 1 1>;
         };
